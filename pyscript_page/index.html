@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SmartMotor Bridge</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.8.2/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.8.2/core.js"></script>
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { display: flex; gap: 20px; }
+        .motor-section { flex: 1; border: 2px solid #ccc; padding: 15px; border-radius: 8px; }
+        .motor-section h3 { margin-top: 0; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .controls { margin: 15px 0; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        .bridge-status { text-align: center; padding: 15px; background-color: #e9ecef; border-radius: 8px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>SmartMotor Communication Bridge</h1>
+    
+    <div class="bridge-status">
+        <h3>Bridge Status</h3>
+        <div id="bridge-status">Initializing...</div>
+        <button id="start-bridge">Start Bridge</button>
+        <button id="stop-bridge">Stop Bridge</button>
+    </div>
+    
+    <div class="container">
+        <div class="motor-section">
+            <h3>Controller Motor</h3>
+            <div id="controller-status" class="status disconnected">Disconnected</div>
+            <div class="controls">
+                <button id="connect-controller">Connect Controller</button>
+                <button id="disconnect-controller">Disconnect Controller</button>
+            </div>
+            <div>Last Data: <span id="controller-data">None</span></div>
+        </div>
+        
+        <div class="motor-section">
+            <h3>Receiver Motor</h3>
+            <div id="receiver-status" class="status disconnected">Disconnected</div>
+            <div class="controls">
+                <button id="connect-receiver">Connect Receiver</button>
+                <button id="disconnect-receiver">Disconnect Receiver</button>
+            </div>
+            <div>Last Data: <span id="receiver-data">None</span></div>
+        </div>
+    </div>
+    
+    <div id='all_things_ble'></div>
+    <div id='all_things_channels'></div>
+    <div id='all_things_plotly'></div>
+    
+    <script type="mpy" src="./main.py" config="./pyscript.toml" env='su25'></script>
+</body>
+</html>
