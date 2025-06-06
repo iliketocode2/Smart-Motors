@@ -97,58 +97,52 @@ class SmartMotorReceiver(WebSocketBase):
         except Exception as e:
             print("Error processing channel message: {}".format(e))
 
-    def update_display(self, wifi_status, servo_angle, last_roll=None, connection_status="Unknown"):
-        """Update the receiver display"""
+    def update_display_status(self):
+        """Display status updater for receiver"""
         if not self.display:
             return
-        try:
-            self.display.fill(0)
-            self.display.text("RECEIVER", 25, 0)
-            self.display.text("WiFi: {}".format(wifi_status), 0, 15)
-            self.display.text("WS: {}".format(connection_status), 0, 25)
-            if self.subscribed:
-                self.display.text("SUBSCRIBED", 0, 35)
-            self.display.text("Servo: {:.0f}deg".format(servo_angle), 0, 45)
-            if last_roll is not None:
-                self.display.text("Roll: {:.1f}".format(last_roll), 0, 55)
-            self.display.show()
-        except Exception as e:
-            print("Display update error: {}".format(e))
+            
+        wlan = network.WLAN(network.STA_IF)
+        wifi_status = "Connected" if wlan.isconnected() else "Disconnected"
+        
+        self.display.fill(0)
+        self.display.text("RECEIVER", 25, 0)
+        self.display.text(f"WiFi: {wifi_status}", 0, 15)
+        self.display.text(f"WS: {self.connection_status}", 0, 25)
+        if self.subscribed:
+            self.display.text("SUBSCRIBED", 0, 35)
+        self.display.text(f"Servo: {self.current_angle}°", 0, 45)
+        if self.last_roll is not None:
+            self.display.text(f"Roll: {self.last_roll:.1f}°", 0, 55)
+        self.display.show()
 
     def run(self):
-        """Main receiver loop"""
-        print("Starting Receiver main loop...")
-        import network
+        """Final receiver main loop"""
+        print("Starting Receiver...")
         
-        try:
-            while True:
-                current_time = time.ticks_ms()
-                
-                # Handle connection management
+        while True:
+            try:
+                # Manage connection
                 if not self.run_connection_loop():
+                    time.sleep(1)
                     continue
-                
-                # Update display periodically
+                    
+                # Update display
+                current_time = time.ticks_ms()
                 if time.ticks_diff(current_time, self.last_display_update) > self.display_update_interval:
-                    wlan = network.WLAN(network.STA_IF)
-                    wifi_status = "Connected" if wlan.isconnected() else "Disconnected"
-                    self.update_display(wifi_status, self.current_angle, 
-                                      self.last_roll, self.connection_status)
+                    self.update_display_status()
                     self.last_display_update = current_time
-                
+                    
                 time.sleep(0.1)
                 
-        except KeyboardInterrupt:
-            print("Stopped by user")
-        except Exception as e:
-            print("Critical error in main loop: {}".format(e))
-            sys.print_exception(e)
-        finally:
-            print("Cleaning up...")
-            if self.ws:
-                self.close_websocket()
-            if self.servo_motor:
-                self.move_servo(90)  # Return servo to center
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print("Main loop error:", e)
+                time.sleep(5)
+                
+        self.close_websocket()
+        self.move_servo(90)  # Center on exit
 
 if __name__ == "__main__":
     print("="*60)
