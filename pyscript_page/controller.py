@@ -107,52 +107,41 @@ class SmartMotorController(WebSocketBase):
             print("Display update error: {}".format(e))
 
     def run(self):
-        """Main controller loop"""
-        print("Starting Controller main loop...")
-        import network
+        """Final controller main loop"""
+        print("Starting Controller...")
+        last_roll = None
         
-        try:
-            while True:
-                current_time = time.ticks_ms()
-                
-                # Handle connection management
+        while True:
+            try:
+                # Manage connection
                 if not self.run_connection_loop():
+                    time.sleep(1)
                     continue
-                
-                # Send sensor data at regular intervals
+                    
+                # Send sensor data
+                current_time = time.ticks_ms()
                 if time.ticks_diff(current_time, self.last_send) > self.send_interval:
-                    sent = self.send_sensor_data()
-                    if sent:
-                        print("Sensor data sent successfully")
+                    if self.send_sensor_data():
+                        self.last_send = current_time
                         try:
                             if self.sensor_system:
-                                roll, pitch = self.sensor_system.readroll()
+                                _, roll = self.sensor_system.readroll()
                                 last_roll = roll
                         except:
-                            last_roll = None
+                            pass
                     else:
                         print("Failed to send sensor data")
-                        self.close_websocket()
-                        continue
-                    self.last_send = current_time
-                    
-                # Update display
-                wlan = network.WLAN(network.STA_IF)
-                wifi_status = "Connected" if wlan.isconnected() else "Disconnected"
-                self.update_display(wifi_status, self.connection_status, 
-                                  last_roll if 'last_roll' in locals() else None)
-                
+                        time.sleep(1)
+                        
                 time.sleep(0.1)
                 
-        except KeyboardInterrupt:
-            print("Stopped by user")
-        except Exception as e:
-            print("Critical error in main loop: {}".format(e))
-            sys.print_exception(e)
-        finally:
-            print("Cleaning up...")
-            if self.ws:
-                self.close_websocket()
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print("Main loop error:", e)
+                time.sleep(5)
+                
+        self.close_websocket()
 
 if __name__ == "__main__":
     print("="*60)
