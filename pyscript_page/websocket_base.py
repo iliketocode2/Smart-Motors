@@ -9,6 +9,7 @@ import icons
 import uselect
 import struct
 import ussl
+import urandom
  
 try:
     import ssl
@@ -125,6 +126,7 @@ class WebSocketBase:
             if b"101 Switching Protocols" in response:
                 print("WebSocket connected successfully!")
                 self.connection_status = "Connected"
+                time.sleep(0.5)
                 return True
             else:
                 print("WebSocket handshake failed")
@@ -137,215 +139,172 @@ class WebSocketBase:
             return False
 
     def parse_websocket_frame(self, frame_data):
-        """Improved WebSocket frame parser"""
-        messages = []
+        """Parse incoming WebSocket frames (RFC 6455)"""
         i = 0
-        
+        messages = []
+
         while i < len(frame_data):
-            if i + 1 >= len(frame_data):
-                break
-                
-            # Parse frame header
-            first_byte = frame_data[i]
-            fin = (first_byte & 0x80) != 0
-            opcode = first_byte & 0x0F
+            if i + 2 > len(frame_data):
+                break  # incomplete frame
+
+            b1 = frame_data[i]
+            fin = b1 & 0x80
+            opcode = b1 & 0x0F
             i += 1
-            
-            second_byte = frame_data[i]
-            masked = (second_byte & 0x80) != 0
-            payload_len = second_byte & 0x7F
+
+            b2 = frame_data[i]
+            mask = b2 & 0x80
+            payload_len = b2 & 0x7F
             i += 1
-            
-            # Handle extended payload length
+
             if payload_len == 126:
-                if i + 2 > len(frame_data):
-                    break
-                payload_len = (frame_data[i] << 8) + frame_data[i+1]
+                if i + 2 > len(frame_data): break
+                payload_len = (frame_data[i] << 8) + frame_data[i + 1]
                 i += 2
             elif payload_len == 127:
-                if i + 8 > len(frame_data):
-                    break
-                payload_len = 0
-                for j in range(8):
-                    payload_len = (payload_len << 8) + frame_data[i+j]
+                if i + 8 > len(frame_data): break
+                payload_len = int.from_bytes(frame_data[i:i+8], 'big')
                 i += 8
-            
-            # Skip mask if present (shouldn't be from server)
-            if masked and i + 4 <= len(frame_data):
+
+            if mask:
+                if i + 4 > len(frame_data): break
                 mask_key = frame_data[i:i+4]
                 i += 4
             else:
                 mask_key = None
-            
-            # Handle different opcodes
-            if opcode == 0x1:  # Text frame
-                if i + payload_len > len(frame_data):
-                    break
-                    
-                payload = frame_data[i:i+payload_len]
-                i += payload_len
-                
-                # Unmask if needed
-                if mask_key:
-                    payload = bytearray(payload)
-                    for j in range(len(payload)):
-                        payload[j] ^= mask_key[j % 4]
-                
+
+            if i + payload_len > len(frame_data):
+                break  # wait for more data
+
+            payload = bytearray(frame_data[i:i + payload_len])
+            i += payload_len
+
+            if mask_key:
+                for j in range(payload_len):
+                    payload[j] ^= mask_key[j % 4]
+
+            # Handle opcodes
+            if opcode == 0x1:  # text
                 try:
-                    message = ujson.loads(payload.decode('utf-8'))
-                    messages.append(message)
-                    if "client_id" in message:
-                        self.client_id = message["client_id"]
+                    msg = ujson.loads(payload.decode('utf-8'))
+                    messages.append(msg)
                 except Exception as e:
-                    print("JSON decode error:", e)
-                    
-            elif opcode == 0x8:  # Close frame
+                    print("Text decode error:", e)
+            elif opcode == 0x8:  # close
                 print("Close frame received")
                 self.close_websocket()
                 break
-                
-            elif opcode == 0x9:  # Ping frame
-                print("Ping received - sending pong")
-                self.send_pong(frame_data[i:i+payload_len])
-                i += payload_len
-                
-            elif opcode == 0xA:  # Pong frame
+            elif opcode == 0x9:  # Ping
+                print(f"Ping received! Payload: {repr(payload)}")
+                self.send_pong(payload)
+            elif opcode == 0xA:  # pong
                 print("Pong received")
-                i += payload_len
-                
             else:
-                print(f"Unknown opcode: {opcode} - skipping")
-                i += payload_len
-                
+                print(f"Unsupported opcode: {opcode} - skipping {payload_len} bytes")
+
         return messages
 
-    def send_pong(self, payload=None):
-        """Send pong response to ping"""
+
+    def send_pong(self, payload=b''):
+        """Send Pong frame in response to Ping"""
         if not self.ws:
             return
-            
-        try:
-            frame = bytearray([0x8A])  # Pong opcode
-            if payload:
-                frame.append(len(payload))
-                frame.extend(payload)
-            else:
-                frame.append(0)
-            self.ws.write(frame)
-        except Exception as e:
-            print("Pong send error:", e)
-            self.close_websocket()
 
-    def send_websocket_frame(self, data):
-        """Improved WebSocket frame sending"""
-        if not self.ws:
-            return False
-            
         try:
-            # Convert data to JSON
-            json_data = ujson.dumps(data)
-            payload = json_data.encode('utf-8')
-            length = len(payload)
-            
-            # Build WebSocket frame
             frame = bytearray()
-            frame.append(0x81)  # FIN + text frame
-            
+            frame.append(0x8A)  # FIN + opcode 0xA (pong)
+
+            length = len(payload)
             if length <= 125:
                 frame.append(length)
-            elif length <= 65535:
+            elif length < 65536:
                 frame.append(126)
                 frame.extend(length.to_bytes(2, 'big'))
             else:
                 frame.append(127)
                 frame.extend(length.to_bytes(8, 'big'))
-            
-            frame.extend(payload)
-            
-            # Send frame
-            self.ws.write(frame)
-            return True
-            
-        except Exception as e:
-            print("WebSocket send error:", e)
-            self.close_websocket()
-            return False
 
-    def subscribe_to_channel(self):
-        """Subscribe to channel with retry logic"""
-        if self.subscribed:
-            return True
+            frame.extend(payload)
+            self.ws.write(frame)
+            time.sleep(0.01)
+
+            print("Pong sent")
+        except Exception as e:
+            print("Pong send error:", e)
+            self.close_websocket()
             
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                subscribe_msg = {
-                    "type": "subscribe",
-                    "payload": ""
-                }
-                
-                print("Subscription attempt {} of {}".format(attempt + 1, max_retries))
-                
-                if self.send_websocket_frame(subscribe_msg):
-                    print("Subscribe message sent successfully")
-                    
-                    # Wait for confirmation with timeout
-                    start_time = time.ticks_ms()
-                    timeout = 5000  # 5 seconds
-                    
-                    while time.ticks_diff(time.ticks_ms(), start_time) < timeout:
-                        self.handle_incoming_messages()
-                        
-                        # Check if we received any messages indicating success
-                        if self.client_id:
-                            print("Subscription successful - client_id received: {}".format(self.client_id))
-                            self.subscribed = True
-                            return True
-                            
-                        time.sleep(0.1)
-                    
-                    print("Subscription timeout on attempt {}".format(attempt + 1))
-                    
-                else:
-                    print("Failed to send subscribe message on attempt {}".format(attempt + 1))
-                    
-            except Exception as e:
-                print("Subscription error on attempt {}: {}".format(attempt + 1, e))
-                
-            if attempt < max_retries - 1:
-                time.sleep(2)  # Wait before retry
-        
-        print("All subscription attempts failed")
-        return False
 
     def handle_incoming_messages(self):
-        """Improved message handler"""
+        """Read and respond to incoming WebSocket messages (ping, data, etc.)"""
         try:
             if not self.ws:
                 return
-                
+
+            import uselect
             poll = uselect.poll()
             poll.register(self.ws, uselect.POLLIN)
-            events = poll.poll(50)  # 50ms timeout
-            
+            events = poll.poll(10)  # small timeout
+
             if events:
                 data = self.ws.read(1024)
                 if not data:
-                    print("Connection closed by server")
+                    print("Server closed the connection")
                     self.close_websocket()
                     return
-                    
+
                 messages = self.parse_websocket_frame(data)
                 for msg in messages:
                     self.process_channel_message(msg)
-                    
+
         except Exception as e:
             print("Message handling error:", e)
             self.close_websocket()
 
-    def process_channel_message(self, message):
-        """Process channel message - override in subclass"""
-        pass
+
+    def send_websocket_frame(self, data):
+        """Send WebSocket text frame with masking (RFC 6455 compliant)"""
+        if not self.ws:
+            return False
+
+        try:
+            import urandom
+
+            # JSON encode and convert to bytes
+            json_data = ujson.dumps(data)
+            payload = json_data.encode('utf-8')
+            length = len(payload)
+
+            frame = bytearray()
+            frame.append(0x81)  # FIN bit + text frame opcode
+
+            # Use client-to-server masking (required)
+            mask_key = bytearray([urandom.getrandbits(8) for _ in range(4)])
+            masked_payload = bytearray(length)
+
+            for i in range(length):
+                masked_payload[i] = payload[i] ^ mask_key[i % 4]
+
+            # Determine length format
+            if length <= 125:
+                frame.append(0x80 | length)  # Mask bit set
+            elif length < (1 << 16):
+                frame.append(0x80 | 126)
+                frame.extend(length.to_bytes(2, 'big'))
+            else:
+                frame.append(0x80 | 127)
+                frame.extend(length.to_bytes(8, 'big'))
+
+            frame.extend(mask_key)
+            frame.extend(masked_payload)
+
+            self.ws.write(frame)
+            return True
+
+        except Exception as e:
+            print("WebSocket send error:", e)
+            self.close_websocket()
+            return False
+        
 
     def close_websocket(self):
         """Properly close WebSocket connection"""
@@ -359,6 +318,7 @@ class WebSocketBase:
         self.subscribed = False
         self.client_id = None
         self.connection_status = "Disconnected"
+        
 
     def wait_for_connection_ready(self):
         """Wait for WebSocket to be fully ready"""
@@ -393,6 +353,7 @@ class WebSocketBase:
         print("Connection readiness timeout")
         return False
 
+
     def run_connection_loop(self):
         """Improved connection management"""
         import network
@@ -421,6 +382,7 @@ class WebSocketBase:
             
             if events:
                 data = self.ws.read(1024)
+                print("Server sent before disconnect:", repr(data))
                 if data:
                     self.parse_websocket_frame(data)
                 else:
