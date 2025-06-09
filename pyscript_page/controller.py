@@ -31,7 +31,7 @@ class SmartMotorController(WebSocketBase):
 
     def send_sensor_data(self):
         """Read sensors and send data over WebSocket"""
-        if not self.sensor_system or not self.subscribed:
+        if not self.sensor_system:
             return False
         try:
             x, y, z = self.sensor_system.readaccel()
@@ -50,17 +50,15 @@ class SmartMotorController(WebSocketBase):
             
             # Send as channel message
             message = {
-                "type": "message",
-                "payload": {
-                    "topic": "/SM/accel",
-                    "value": ujson.dumps(sensor_data)
-                }
+                "topic": "/SM/accel",
+                "value": sensor_data
             }
             
             print("Sending sensor data: roll={}, pitch={}".format(roll, pitch))
             return self.send_websocket_frame(message)
         except Exception as e:
             print("Sensor read error: {}".format(e))
+            print("Send failed: sensor_system =", self.sensor_system)
             return False
 
     def process_channel_message(self, message):
@@ -97,8 +95,6 @@ class SmartMotorController(WebSocketBase):
             self.display.text("CONTROLLER", 20, 0)
             self.display.text("WiFi: {}".format(wifi_status), 0, 15)
             self.display.text("WS: {}".format(connection_status), 0, 25)
-            if self.subscribed:
-                self.display.text("SUBSCRIBED", 0, 35)
             if last_roll is not None:
                 self.display.text("Roll: {:.1f}".format(last_roll), 0, 45)
             self.display.text("Sending...", 0, 55)
@@ -114,26 +110,46 @@ class SmartMotorController(WebSocketBase):
         while True:
             try:
                 # Manage connection
-                if not self.run_connection_loop():
-                    time.sleep(1)
-                    continue
+#                 if not self.run_connection_loop():
+#                     time.sleep(1)
+#                     continue
+# 
+#                 self.handle_incoming_messages()
+                try:
+                    data = self.ws.read(1024)
+                    if data:
+                        print("Got raw WebSocket data:", repr(data))
+                        self.parse_websocket_frame(data)
+                except Exception as e:
+                    print("WebSocket read error:", e)
+
+
+                self.send_sensor_data()  # Or receiver logic
+                time.sleep(0.2)
+
+                
+#                 if self.subscribe_to_channel():
+#                     print("Subscribed to channel successfully.")
+#                 else:
+#                     print("Subscription failed.")
+
                     
                 # Send sensor data
-                current_time = time.ticks_ms()
-                if time.ticks_diff(current_time, self.last_send) > self.send_interval:
-                    if self.send_sensor_data():
-                        self.last_send = current_time
-                        try:
-                            if self.sensor_system:
-                                _, roll = self.sensor_system.readroll()
-                                last_roll = roll
-                        except:
-                            pass
-                    else:
-                        print("Failed to send sensor data")
-                        time.sleep(1)
-                        
-                time.sleep(0.1)
+#                 current_time = time.ticks_ms()
+#                 if time.ticks_diff(current_time, self.last_send) > self.send_interval:
+#                     if self.send_sensor_data():
+#                         self.last_send = current_time
+#                         try:
+#                             if self.sensor_system:
+#                                 _, roll = self.sensor_system.readroll()
+#                                 last_roll = roll
+#                         except:
+#                             pass
+#                     else:
+#                         print("Failed to send sensor data")
+#                         time.sleep(1)
+#                         
+#                 time.sleep(0.1)
                 
             except KeyboardInterrupt:
                 break
