@@ -7,9 +7,11 @@ import ussl
 from machine import Pin, SoftI2C
 import urandom
 import icons
+import _thread
+import struct
 
 # WiFi Configuration
-SSID = "tufts_eecs"
+SSID = "tufts_eecs" 
 PASSWORD = ""
 
 # WebSocket Configuration
@@ -18,10 +20,15 @@ WS_PORT = 443
 WS_PATH = "/talking-on-a-channel/api/channels/hackathon"
 
 class ESP32Controller:
-    def __init__(self):
+    def __init__(self, device_name="controller", listen_topic="/receiver/status"):
+        self.device_name = device_name
+        self.listen_topic = listen_topic
+        self.send_topic = f"/{device_name}/status"
         self.ws = None
         self.connected = False
         self.display = None
+        self.running = True
+        self.last_received = {}
         self.setup_display()
         self.setup_wifi()
         
@@ -97,6 +104,7 @@ class ESP32Controller:
             
             # Create SSL socket
             raw_sock = socket.socket()
+            raw_sock.settimeout(10)  # Set timeout for connection
             raw_sock.connect(addr)
             self.ws = ussl.wrap_socket(raw_sock, server_hostname=WS_HOST)
             
@@ -186,6 +194,211 @@ class ESP32Controller:
             self.connected = False
             return False
     
+    def parse_websocket_frame(self, data):
+        """Parse incoming WebSocket frame"""
+        if len(data) < 2:
+            return None
+            
+        # Parse frame header
+        byte1, byte2 = data[0], data[1]
+        fin = (byte1 & 0x80) >> 7
+        opcode = byte1 & 0x0f
+        masked = (byte2 & 0x80) >> 7
+        payload_length = byte2 & 0x7f
+        
+        offset = 2
+        
+        # Handle extended payload length
+        if payload_length == 126:
+            if len(data) < offset + 2:
+                return None
+            payload_length = struct.unpack('>H', data[offset:offset+2])[0]
+            offset += 2
+        elif payload_length == 127:
+            if len(data) < offset + 8:
+                return None
+            payload_length = struct.unpack('>Q', data[offset:offset+8])[0]
+            offset += 8
+        
+        # Handle masking key
+        if masked:
+            if len(data) < offset + 4:
+                return None
+            mask_key = data[offset:offset+4]
+            offset += 4
+        
+        # Extract payload
+        if len(data) < offset + payload_length:
+            return None
+            
+        payload = data[offset:offset+payload_length]
+        
+        # Unmask payload if needed
+        if masked:
+            payload = bytearray(payload)
+            for i in range(len(payload)):
+                payload[i] ^= mask_key[i % 4]
+            payload = bytes(payload)
+        
+        # Only handle text frames
+        if opcode == 1 and fin == 1:
+            return payload.decode('utf-8')
+        
+        return None
+    
+    def handle_message(self, message_str):
+        """Handle incoming message"""
+        try:
+            # Parse the channel message format
+            channel_message = json.loads(message_str)
+            if 'payload' in channel_message:
+                payload_dict = json.loads(channel_message['payload'])
+                topic = payload_dict.get('topic', '')
+                value = payload_dict.get('value', '')
+                
+                print(f"Received: {topic} = {value}")
+                
+                # Check if this is the topic we're listening for
+                if topic == self.listen_topic:
+                    self.last_received = value
+                    print(f"Processing message from {topic}: {value}")
+                    
+                    # Update display with received data
+                    if isinstance(value, dict) and 'count' in value:
+                        self.update_display(
+                            "ESP32", 
+                            "Controller",
+                            f"Sent: {send_count}",
+                            f"Rcvd: {value.get('count', 0)}"
+                        )
+                    
+                    # Add your custom message handling logic here
+                    self.process_received_message(topic, value)
+                    
+        except Exception as e:
+            print(f"Message handling error: {e}")
+    
+    def process_received_message(self, topic, value):
+        """Override this method to add custom message processing"""
+        # Example: if we receive a command, we could respond
+        if isinstance(value, dict):
+            if value.get('command') == 'ping':
+                response_data = {
+                    "device": self.device_name,
+                    "response": "pong",
+                    "timestamp": time.ticks_ms()
+                }
+                self.send_message(f"/{self.device_name}/response", response_data)
+    
+    def safe_decode(self, data):
+        """Safely decode bytes to string, handling invalid UTF-8"""
+        try:
+            return data.decode('utf-8')
+        except:
+            # Fall back to latin-1 which can decode any byte sequence
+            try:
+                return data.decode('latin-1')
+            except:
+                # Last resort: decode with replacement character by character
+                result = ""
+                for byte in data:
+                    if 32 <= byte <= 126:  # Printable ASCII
+                        result += chr(byte)
+                    else:
+                        result += '?'
+                return result
+    
+    def listen_for_messages(self):
+        """Listen for incoming WebSocket messages - simplified version"""
+        
+        while self.running and self.connected:
+            try:
+                # Simple approach: try to read with a very short operation
+                # Use select-like behavior by attempting read with minimal blocking
+                data = self.ws.read(1)
+                if data:
+                    # If we got data, try to read more
+                    more_data = b""
+                    try:
+                        # Try to read more, but don't block forever
+                        while len(more_data) < 1024:  # Reasonable limit
+                            chunk = self.ws.read(1)
+                            if chunk:
+                                more_data += chunk
+                            else:
+                                break
+                    except:
+                        pass
+                    
+                    full_data = data + more_data
+                    
+                    # Simple message extraction - look for JSON patterns
+                    # FIXED: Use safe_decode instead of decode with errors parameter
+                    data_str = self.safe_decode(full_data)
+                    if '"topic"' in data_str and '"value"' in data_str:
+                        # Try to extract JSON from the WebSocket frame
+                        try:
+                            # Find JSON content (simplified extraction)
+                            start = data_str.find('{')
+                            if start != -1:
+                                end = data_str.rfind('}') + 1
+                                if end > start:
+                                    json_str = data_str[start:end]
+                                    self.handle_message(json_str)
+                        except Exception as e:
+                            print(f"JSON parse error: {e}")
+                
+                # Small delay to prevent busy waiting  
+                time.sleep(0.1)
+                        
+            except OSError as e:
+                # Handle various socket errors
+                error_msg = str(e)
+                if "timeout" in error_msg.lower() or "would block" in error_msg.lower() or "EAGAIN" in error_msg:
+                    # These are expected for non-blocking operations
+                    time.sleep(0.1)
+                    continue
+                else:
+                    print(f"Listen socket error: {e}")
+                    self.connected = False
+                    break
+            except Exception as e:
+                print(f"Listen error: {e}")
+                time.sleep(0.1)  # Brief pause before retrying
+    
+    def sender_loop(self):
+        """Main sending loop"""
+        send_count = 0
+        
+        while self.running:
+            try:
+                if self.connected:
+                    # Send controller data every 2 seconds
+                    timestamp = time.ticks_ms()
+                    controller_data = {
+                        "device": self.device_name,
+                        "timestamp": timestamp,
+                        "status": "active",
+                        "count": send_count,
+                        "listening_to": self.listen_topic
+                    }
+                    
+                    success = self.send_message(self.send_topic, controller_data)
+                    
+                    if success:
+                        send_count += 1
+                        print(f"Sent count: {send_count}")
+                    else:
+                        print("Send failed, will reconnect...")
+                        self.connected = False
+                
+                time.sleep(2)
+                
+            except Exception as e:
+                print(f"Sender loop error: {e}")
+                self.connected = False
+                time.sleep(1)
+    
     def close(self):
         if self.ws:
             try:
@@ -194,12 +407,14 @@ class ESP32Controller:
                 pass
             self.ws = None
         self.connected = False
+        self.running = False
     
     def run(self):
-        print("Starting ESP32 Controller...")
-        send_count = 0
+        print(f"Starting ESP32 {self.device_name}...")
+        print(f"Will send to: {self.send_topic}")
+        print(f"Will listen to: {self.listen_topic}")
         
-        while True:
+        while self.running:
             try:
                 # Connect if not connected
                 if not self.connected:
@@ -209,27 +424,54 @@ class ESP32Controller:
                         time.sleep(5)
                         continue
                 
-                # Send controller data every 2 seconds
-                timestamp = time.ticks_ms()
-                controller_data = {
-                    "device": "controller",
-                    "timestamp": timestamp,
-                    "status": "active",
-                    "count": send_count
-                }
-                
-                success = self.send_message("/controller/status", controller_data)
-                
-                if success:
-                    send_count += 1
-                    self.update_display("ESP32", "Controller", f"Sent: {send_count}", "Active")
-                else:
-                    print("Send failed, reconnecting...")
-                    self.update_display("ESP32", "Controller", "Send Failed", "Reconnecting")
-                    self.connected = False
-                    self.close()
-                
-                time.sleep(2)
+                # Start sender thread if threading is available
+                try:
+                    _thread.start_new_thread(self.sender_loop, ())
+                    print("Sender thread started")
+                    # Main loop handles receiving
+                    self.listen_for_messages()
+                except:
+                    print("Threading not available, running single-threaded")
+                    # Fall back to single-threaded operation
+                    # Alternate between sending and listening
+                    send_count = 0
+                    last_send_time = 0
+                    
+                    while self.running and self.connected:
+                        current_time = time.ticks_ms()
+                        
+                        # Send every 2 seconds
+                        if time.ticks_diff(current_time, last_send_time) > 2000:
+                            timestamp = time.ticks_ms()
+                            controller_data = {
+                                "device": self.device_name,
+                                "timestamp": timestamp,
+                                "status": "active",
+                                "count": send_count,
+                                "listening_to": self.listen_topic
+                            }
+                            
+                            success = self.send_message(self.send_topic, controller_data)
+                            
+                            if success:
+                                send_count += 1
+                                self.update_display("ESP32", "Controller", f"Sent: {send_count}", "Active")
+                                last_send_time = current_time
+                            else:
+                                print("Send failed, will reconnect...")
+                                self.connected = False
+                                break
+                        
+                        # Try to listen for a short time
+                        try:
+                            data = self.ws.read(1)
+                            if data:
+                                # Process received data (simplified)
+                                print("Received data:", data)
+                        except:
+                            pass
+                        
+                        time.sleep(0.1)
                 
             except KeyboardInterrupt:
                 print("Stopping controller...")
@@ -244,7 +486,19 @@ class ESP32Controller:
         
         self.close()
 
+# Configuration for different devices
+# For the "controller" ESP32:
+# controller = ESP32Controller("controller", "/receiver/status")
+
+# For the "receiver" ESP32:
+# controller = ESP32Controller("receiver", "/controller/status")
+
 # Run the controller
 if __name__ == "__main__":
-    controller = ESP32Controller()
+    # Change these parameters based on which ESP32 this is running on
+    DEVICE_NAME = "receiver"  # Change to "receiver" for the other ESP32
+    LISTEN_TOPIC = "/controller/status"  # Change to "/controller/status" for the other ESP32
+    
+    controller = ESP32Controller(DEVICE_NAME, LISTEN_TOPIC)
     controller.run()
+
