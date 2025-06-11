@@ -427,25 +427,48 @@ class ESP32ServoController:
             print("No servo available")
             return False
     
+    def safe_decode(self, data):
+        """Safely decode bytes to string, handling MicroPython limitations"""
+        try:
+            if isinstance(data, bytes):
+                # MicroPython decode() doesn't support keyword arguments
+                return data.decode('utf-8')
+            elif isinstance(data, str):
+                return data
+            else:
+                return str(data)
+        except UnicodeDecodeError:
+            # Handle decode errors by replacing invalid characters
+            result = ""
+            for byte in data:
+                if isinstance(byte, int):
+                    if 32 <= byte <= 126:  # Printable ASCII
+                        result += chr(byte)
+                    else:
+                        result += "?"
+                else:
+                    result += str(byte)
+            return result
+    
     def listen_for_messages(self):
-        """Listen for incoming messages - FIXED: Use read() instead of recv()"""
+        """Listen for incoming messages - FIXED: Removed keyword arguments from decode()"""
         while self.running and self.connected:
             try:
-                # FIXED: Use read() instead of recv() for SSL sockets
+                # Use read() instead of recv() for SSL sockets
                 data = self.ws.read(1024)
                 if data:
-                    # Handle the data as bytes
+                    # Handle the data as bytes - FIXED: No keyword arguments
                     if isinstance(data, bytes):
                         self.receive_buffer += data
                     else:
                         # If it's already a string, encode it
-                        self.receive_buffer += data.encode('utf-8', errors='ignore')
+                        self.receive_buffer += data.encode('utf-8')
                     
                     # Look for complete JSON messages
                     while b'{' in self.receive_buffer and b'}' in self.receive_buffer:
                         try:
-                            # Convert to string for processing
-                            buffer_str = self.receive_buffer.decode('utf-8', errors='ignore')
+                            # Convert to string for processing - FIXED: Use safe_decode
+                            buffer_str = self.safe_decode(self.receive_buffer)
                             start = buffer_str.find('{')
                             if start == -1:
                                 break
@@ -508,7 +531,7 @@ class ESP32ServoController:
                 if time.ticks_diff(current_time, last_send_time) > 500:
                     
                     if self.device_name == "controller":
-                        # Send potentiometer reading - FIXED: Use correct method name
+                        # Send potentiometer reading
                         angle = self.read_potentiometer()
                         
                         # Only send if angle changed significantly
@@ -645,18 +668,18 @@ class ESP32ServoController:
                             last_send_time = current_time
                             gc.collect()  # Force garbage collection
                         
-                        # Try to listen with smaller buffer - FIXED: Use read() instead of recv()
+                        # Try to listen with smaller buffer - FIXED: Use safe_decode
                         try:
                             data = self.ws.read(128)
                             if data:
                                 if isinstance(data, bytes):
                                     self.receive_buffer += data
                                 else:
-                                    self.receive_buffer += data.encode('utf-8', errors='ignore')
+                                    self.receive_buffer += data.encode('utf-8')
                                     
                                 if len(self.receive_buffer) > 512:
                                     # Try to parse any complete messages
-                                    buffer_str = self.receive_buffer.decode('utf-8', errors='ignore')
+                                    buffer_str = self.safe_decode(self.receive_buffer)
                                     if '{' in buffer_str and '}' in buffer_str:
                                         start = buffer_str.find('{')
                                         end = buffer_str.rfind('}') + 1
