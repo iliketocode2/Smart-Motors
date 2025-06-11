@@ -48,9 +48,9 @@ class ESP32ServoController:
         self.knob_last_stable_angle = 90
         self.knob_dead_zone = 5  # Increased to reduce network traffic
         
-        # Add receive buffer management
-        self.receive_buffer = b""
-        self.max_buffer_size = 2048  # Limit buffer size
+        # Simplified receive buffer management
+        self.receive_buffer = ""
+        self.max_buffer_size = 1024  # Smaller buffer size
         
     def setup_hardware(self):
         """Setup hardware based on your control_center.py"""
@@ -258,72 +258,75 @@ class ESP32ServoController:
             self.connected = False
             return False
     
-    def parse_websocket_frame(self, data):
-        """Parse incoming WebSocket frame with better error handling"""
+    def safe_decode(self, data):
+        """Safely decode bytes to string - FIXED for MicroPython"""
         try:
-            if len(data) < 2:
-                return None
-                
-            # Parse frame header
-            byte1, byte2 = data[0], data[1]
-            fin = (byte1 & 0x80) >> 7
-            opcode = byte1 & 0x0f
-            masked = (byte2 & 0x80) >> 7
-            payload_length = byte2 & 0x7f
+            if isinstance(data, bytes):
+                # Try to decode as UTF-8
+                return data.decode('utf-8')
+            elif isinstance(data, str):
+                return data
+            else:
+                return str(data)
+        except Exception:  # Catch any decode error in MicroPython
+            # Handle decode errors by replacing invalid characters
+            if isinstance(data, bytes):
+                result = ""
+                for byte_val in data:
+                    if 32 <= byte_val <= 126:  # Printable ASCII
+                        result += chr(byte_val)
+                    else:
+                        result += "?"
+                return result
+            else:
+                return str(data)
+    
+    def extract_json_messages(self, text):
+        """Extract complete JSON messages from text buffer"""
+        messages = []
+        start = 0
+        
+        while True:
+            # Find start of JSON object
+            json_start = text.find('{', start)
+            if json_start == -1:
+                break
             
-            offset = 2
+            # Count braces to find complete JSON
+            brace_count = 0
+            json_end = -1
             
-            # Handle extended payload length
-            if payload_length == 126:
-                if len(data) < offset + 2:
-                    return None
-                payload_length = struct.unpack('>H', data[offset:offset+2])[0]
-                offset += 2
-            elif payload_length == 127:
-                if len(data) < offset + 8:
-                    return None
-                payload_length = struct.unpack('>Q', data[offset:offset+8])[0]
-                offset += 8
+            for i in range(json_start, len(text)):
+                if text[i] == '{':
+                    brace_count += 1
+                elif text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
             
-            # Limit payload size to prevent memory issues
-            if payload_length > 2048:
-                print(f"Payload too large: {payload_length}")
-                return None
-            
-            # Handle masking key
-            if masked:
-                if len(data) < offset + 4:
-                    return None
-                mask_key = data[offset:offset+4]
-                offset += 4
-            
-            # Extract payload
-            if len(data) < offset + payload_length:
-                return None
-                
-            payload = data[offset:offset+payload_length]
-            
-            # Unmask payload if needed
-            if masked:
-                payload = bytearray(payload)
-                for i in range(len(payload)):
-                    payload[i] ^= mask_key[i % 4]
-                payload = bytes(payload)
-            
-            # Only handle text frames
-            if opcode == 1 and fin == 1:
-                return payload.decode('utf-8')
-            
-            return None
-            
-        except Exception as e:
-            print(f"Frame parsing error: {e}")
-            return None
+            if json_end != -1:
+                json_str = text[json_start:json_end]
+                messages.append(json_str)
+                start = json_end
+            else:
+                # Incomplete JSON, save remaining text
+                self.receive_buffer = text[json_start:]
+                break
+        
+        if start < len(text) and json_start == -1:
+            # No JSON found, keep last part of buffer
+            self.receive_buffer = text[start:]
+        elif json_end != -1 and json_end == len(text):
+            # All text processed
+            self.receive_buffer = ""
+        
+        return messages
     
     def handle_message(self, message_str):
-        """Handle incoming CEEO channel message"""
+        """Handle incoming CEEO channel message - IMPROVED"""
         try:
-            print(f"Received: {message_str}")
+            print(f"Raw message: {message_str[:100]}...")  # Debug: show first 100 chars
             
             # Parse CEEO channel message
             channel_msg = json.loads(message_str)
@@ -333,39 +336,70 @@ class ESP32ServoController:
                 return
             
             if channel_msg.get('type') == 'data' and 'payload' in channel_msg:
-                payload = json.loads(channel_msg['payload'])
+                payload_str = channel_msg['payload']
+                print(f"Payload string: {payload_str}")
+                
+                # Parse the inner payload
+                payload = json.loads(payload_str)
                 topic = payload.get('topic', '')
                 value = payload.get('value', {})
                 
-                print(f"Topic: {topic}, Value: {value}")
+                print(f"Parsed - Topic: {topic}, Value: {value}")
                 
                 # Check if this message is for us
                 if topic == self.listen_topic:
+                    print(f"Message is for us! Processing...")
                     self.process_message(value)
+                else:
+                    print(f"Message not for us. Expected: {self.listen_topic}, Got: {topic}")
                     
         except Exception as e:
             print(f"Message handling error: {e}")
     
     def process_message(self, data):
-        """Process received data based on device type"""
+        """Process received data based on device type - IMPROVED"""
+        print(f"Processing message data: {data}")
+        
         if not isinstance(data, dict):
+            print(f"Data is not dict, got: {type(data)}")
             return
         
         if self.device_name == "receiver":
             # Receiver: move servo based on controller's potentiometer
             if 'potentiometer_angle' in data:
                 angle = data['potentiometer_angle']
+                print(f"Received potentiometer angle: {angle}")
+                
                 if isinstance(angle, (int, float)):
                     angle = max(0, min(180, int(angle)))
                     print(f"Moving servo to {angle}°")
+                    
                     if self.move_servo(angle):
                         self.servo_angle = angle
+                        self.update_display(
+                            "RECEIVER",
+                            "Servo Motor",
+                            f"Angle: {angle}°",
+                            "Updated!"
+                        )
+                    else:
+                        print("Failed to move servo")
+                else:
+                    print(f"Invalid angle type: {type(angle)}")
+            else:
+                print("No potentiometer_angle in data")
         
         elif self.device_name == "controller":
             # Controller: display receiver's servo position
             if 'servo_angle' in data:
                 angle = data['servo_angle']
                 print(f"Receiver servo at {angle}°")
+                self.update_display(
+                    "CONTROLLER",
+                    "Remote Servo",
+                    f"Angle: {angle}°",
+                    "Received!"
+                )
     
     def read_potentiometer(self):
         """Simple potentiometer reading method"""
@@ -427,82 +461,26 @@ class ESP32ServoController:
             print("No servo available")
             return False
     
-    def safe_decode(self, data):
-        """Safely decode bytes to string, handling MicroPython limitations"""
-        try:
-            if isinstance(data, bytes):
-                # MicroPython decode() doesn't support keyword arguments
-                return data.decode('utf-8')
-            elif isinstance(data, str):
-                return data
-            else:
-                return str(data)
-        except UnicodeDecodeError:
-            # Handle decode errors by replacing invalid characters
-            result = ""
-            for byte in data:
-                if isinstance(byte, int):
-                    if 32 <= byte <= 126:  # Printable ASCII
-                        result += chr(byte)
-                    else:
-                        result += "?"
-                else:
-                    result += str(byte)
-            return result
-    
     def listen_for_messages(self):
-        """Listen for incoming messages - FIXED: Removed keyword arguments from decode()"""
+        """Listen for incoming messages - SIMPLIFIED and FIXED"""
         while self.running and self.connected:
             try:
-                # Use read() instead of recv() for SSL sockets
-                data = self.ws.read(1024)
+                # Read data from WebSocket
+                data = self.ws.read(512)  # Smaller buffer
                 if data:
-                    # Handle the data as bytes - FIXED: No keyword arguments
-                    if isinstance(data, bytes):
-                        self.receive_buffer += data
-                    else:
-                        # If it's already a string, encode it
-                        self.receive_buffer += data.encode('utf-8')
+                    # Convert to string and add to buffer
+                    text_data = self.safe_decode(data)
+                    self.receive_buffer += text_data
                     
-                    # Look for complete JSON messages
-                    while b'{' in self.receive_buffer and b'}' in self.receive_buffer:
-                        try:
-                            # Convert to string for processing - FIXED: Use safe_decode
-                            buffer_str = self.safe_decode(self.receive_buffer)
-                            start = buffer_str.find('{')
-                            if start == -1:
-                                break
-                            
-                            # Find matching closing brace
-                            brace_count = 0
-                            end = -1
-                            for i in range(start, len(buffer_str)):
-                                if buffer_str[i] == '{':
-                                    brace_count += 1
-                                elif buffer_str[i] == '}':
-                                    brace_count -= 1
-                                    if brace_count == 0:
-                                        end = i + 1
-                                        break
-                            
-                            if end != -1:
-                                message = buffer_str[start:end]
-                                # Remove processed part from buffer
-                                remaining = buffer_str[end:].encode('utf-8')
-                                self.receive_buffer = remaining
-                                self.handle_message(message)
-                                break
-                            else:
-                                break
-                        except Exception as e:
-                            print(f"Message parsing error: {e}")
-                            # Clear buffer on parse error
-                            self.receive_buffer = b""
-                            break
-                
-                    # Limit buffer size to prevent memory issues
+                    # Limit buffer size
                     if len(self.receive_buffer) > self.max_buffer_size:
-                        self.receive_buffer = self.receive_buffer[-1024:]  # Keep last 1KB
+                        # Keep only the last part of buffer
+                        self.receive_buffer = self.receive_buffer[-512:]
+                    
+                    # Extract and process complete JSON messages
+                    messages = self.extract_json_messages(self.receive_buffer)
+                    for message in messages:
+                        self.handle_message(message)
                 
                 time.sleep(0.05)
                 
@@ -527,8 +505,8 @@ class ESP32ServoController:
                 
                 current_time = time.ticks_ms()
                 
-                # Send data every 500ms
-                if time.ticks_diff(current_time, last_send_time) > 500:
+                # Send data every 1000ms (1 second) - slower to reduce network load
+                if time.ticks_diff(current_time, last_send_time) > 1000:
                     
                     if self.device_name == "controller":
                         # Send potentiometer reading
@@ -539,23 +517,39 @@ class ESP32ServoController:
                             data = {
                                 "device": "controller",
                                 "potentiometer_angle": angle,
+                                "timestamp": time.ticks_ms(),
                                 "count": send_count
                             }
                             
+                            print(f"Sending controller data: {data}")
                             if self.send_message(self.send_topic, data):
                                 self.last_potentiometer_angle = angle
                                 send_count += 1
+                                self.update_display(
+                                    "CONTROLLER",
+                                    "Potentiometer",
+                                    f"Angle: {angle}°",
+                                    f"Sent: {send_count}"
+                                )
                     
                     elif self.device_name == "receiver":
                         # Send servo status
                         data = {
                             "device": "receiver", 
                             "servo_angle": self.servo_angle,
+                            "timestamp": time.ticks_ms(),
                             "count": send_count
                         }
                         
+                        print(f"Sending receiver data: {data}")
                         if self.send_message(self.send_topic, data):
                             send_count += 1
+                            self.update_display(
+                                "RECEIVER",
+                                "Servo Status",
+                                f"Angle: {self.servo_angle}°",
+                                f"Sent: {send_count}"
+                            )
                     
                     last_send_time = current_time
                     gc.collect()
@@ -605,7 +599,7 @@ class ESP32ServoController:
                         time.sleep(5)
                         continue
                 
-                # Start sender thread
+                # Try to start sender thread
                 try:
                     _thread.start_new_thread(self.sender_loop, ())
                     print("Sender thread started")
@@ -613,24 +607,26 @@ class ESP32ServoController:
                     self.listen_for_messages()
                 except:
                     print("Threading not available, running single-threaded")
-                    # Single-threaded fallback with reduced frequency
+                    # Single-threaded fallback
                     send_count = 0
                     last_send_time = 0
                     
                     while self.running and self.connected:
                         current_time = time.ticks_ms()
                         
-                        # Send every 500ms instead of 200ms
-                        if time.ticks_diff(current_time, last_send_time) > 500:
+                        # Send every 1000ms
+                        if time.ticks_diff(current_time, last_send_time) > 1000:
                             if self.device_name == "controller":
-                                new_pot_angle = self.read_potentiometer_smooth()
-                                if abs(new_pot_angle - self.last_potentiometer_angle) > self.knob_dead_zone:
+                                new_pot_angle = self.read_potentiometer()
+                                if abs(new_pot_angle - self.last_potentiometer_angle) > 2:
                                     controller_data = {
                                         "device": "controller",
                                         "potentiometer_angle": new_pot_angle,
+                                        "timestamp": current_time,
                                         "count": send_count
                                     }
                                     
+                                    print(f"Single-thread sending: {controller_data}")
                                     success = self.send_message(self.send_topic, controller_data)
                                     if success:
                                         self.last_potentiometer_angle = new_pot_angle
@@ -638,7 +634,7 @@ class ESP32ServoController:
                                         self.update_display(
                                             "CONTROLLER",
                                             "Potentiometer",
-                                            f"Angle: {new_pot_angle}",
+                                            f"Angle: {new_pot_angle}°",
                                             f"Sent: {send_count}"
                                         )
                                     else:
@@ -649,44 +645,39 @@ class ESP32ServoController:
                                 receiver_data = {
                                     "device": "receiver",
                                     "servo_angle": self.servo_angle,
+                                    "timestamp": current_time,
                                     "count": send_count
                                 }
                                 
+                                print(f"Single-thread sending: {receiver_data}")
                                 success = self.send_message(self.send_topic, receiver_data)
                                 if success:
                                     send_count += 1
                                     self.update_display(
                                         "RECEIVER",
-                                        "Servo Motor",
-                                        f"Angle: {self.servo_angle}",
-                                        f"Updates: {send_count}"
+                                        "Servo Status",
+                                        f"Angle: {self.servo_angle}°",
+                                        f"Sent: {send_count}"
                                     )
                                 else:
                                     self.connected = False
                                     break
                             
                             last_send_time = current_time
-                            gc.collect()  # Force garbage collection
+                            gc.collect()
                         
-                        # Try to listen with smaller buffer - FIXED: Use safe_decode
+                        # Try to receive data
                         try:
-                            data = self.ws.read(128)
+                            data = self.ws.read(256)
                             if data:
-                                if isinstance(data, bytes):
-                                    self.receive_buffer += data
-                                else:
-                                    self.receive_buffer += data.encode('utf-8')
-                                    
+                                text_data = self.safe_decode(data)
+                                self.receive_buffer += text_data
+                                
+                                # Limit buffer size
                                 if len(self.receive_buffer) > 512:
-                                    # Try to parse any complete messages
-                                    buffer_str = self.safe_decode(self.receive_buffer)
-                                    if '{' in buffer_str and '}' in buffer_str:
-                                        start = buffer_str.find('{')
-                                        end = buffer_str.rfind('}') + 1
-                                        if start != -1 and end > start:
-                                            message = buffer_str[start:end]
-                                            self.handle_message(message)
-                                    self.receive_buffer = b""
+                                    messages = self.extract_json_messages(self.receive_buffer)
+                                    for message in messages:
+                                        self.handle_message(message)
                         except:
                             pass
                         
