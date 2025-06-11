@@ -32,7 +32,6 @@ class ESP32ServoController:
         self.running = True
         self.last_received = {}
         
-        # Hardware setup based on your control_center.py
         self.setup_hardware()
         self.setup_wifi()
         
@@ -42,13 +41,11 @@ class ESP32ServoController:
         self.potentiometer_angle = 90
         self.last_potentiometer_angle = 90
         
-        # Potentiometer filtering - reduced for better memory management
         self.knob_readings = []
         self.knob_sample_size = 5  # Reduced significantly to save memory
         self.knob_last_stable_angle = 90
         self.knob_dead_zone = 5  # Increased to reduce network traffic
         
-        # Simplified receive buffer management
         self.receive_buffer = ""
         self.max_buffer_size = 1024  # Smaller buffer size
         
@@ -71,7 +68,7 @@ class ESP32ServoController:
         # Setup servo (for receiver ESP32)
         if self.device_name == "receiver":
             try:
-                self.servo = servo.Servo(Pin(2))  # Same pin as your control_center.py
+                self.servo = servo.Servo(Pin(2))
                 self.servo.write_angle(90)  # Center position
                 print("Servo initialized on Pin 2")
             except Exception as e:
@@ -83,7 +80,7 @@ class ESP32ServoController:
         # Setup potentiometer (for controller ESP32)
         if self.device_name == "controller":
             try:
-                self.knob = ADC(Pin(3))  # Pin 3 as per your control_center.py
+                self.knob = ADC(Pin(3))
                 self.knob.atten(ADC.ATTN_11DB)  # Full range 0-3.3V
                 # Test read
                 test_read = self.knob.read()
@@ -106,8 +103,6 @@ class ESP32ServoController:
         if self.display:
             try:
                 self.display.fill(0)
-                # Use consistent Y positioning: 10, 25, 40, 55 (within 64px height)
-                # Center text horizontally where possible
                 self.display.text(line1[:16], 0, 10)  # Limit to 16 chars max
                 self.display.text(line2[:16], 0, 25)
                 if line3:
@@ -268,8 +263,7 @@ class ESP32ServoController:
                 return data
             else:
                 return str(data)
-        except Exception:  # Catch any decode error in MicroPython
-            # Handle decode errors by replacing invalid characters
+        except Exception:
             if isinstance(data, bytes):
                 result = ""
                 for byte_val in data:
