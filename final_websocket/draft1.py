@@ -155,9 +155,6 @@ class ESP32ServoController:
             print("Connecting to WebSocket...")
             self.update_display("ESP32", "Controller", "WebSocket", "Connecting...")
             
-            # Force garbage collection before connection
-            gc.collect()
-            
             addr_info = socket.getaddrinfo(WS_HOST, WS_PORT)
             addr = addr_info[0][-1]
             
@@ -180,51 +177,29 @@ class ESP32ServoController:
                 "\r\n"
             ).format(WS_PATH, WS_HOST, ws_key)
             
-            print(f"Sending handshake to {WS_HOST}:{WS_PORT}{WS_PATH}")
             self.ws.write(handshake.encode())
             
-            # Read handshake response with timeout
+            # Read handshake response
             response = b""
-            start_time = time.ticks_ms()
             while b'\r\n\r\n' not in response:
-                if time.ticks_diff(time.ticks_ms(), start_time) > 10000:  # 10 second timeout
-                    print("Handshake timeout")
+                chunk = self.ws.read(1024)
+                if not chunk:
                     break
-                try:
-                    chunk = self.ws.read(1024)
-                    if chunk:
-                        response += chunk
-                        print(f"Handshake response chunk: {chunk}")
-                except OSError:
-                    time.sleep(0.1)
-                    continue
-            
-            print(f"Full handshake response: {response}")
+                response += chunk
             
             if b"101 Switching Protocols" in response:
                 print("WebSocket connected successfully!")
-                self.update_display("ESP32", "Controller", "Connected", "Listening...")
+                self.update_display("ESP32", "Controller", "Connected", "Sending data")
                 self.connected = True
-                # Clear receive buffer
-                self.receive_buffer = b""
-                
-                # Set socket to non-blocking AFTER successful connection
-                self.ws.setblocking(False)
-                
-                gc.collect()  # Clean up after connection
                 return True
             else:
                 print("WebSocket handshake failed")
-                print(f"Response was: {response}")
                 self.update_display("ESP32", "Controller", "WS Failed", "Handshake")
                 return False
                 
         except Exception as e:
             print(f"WebSocket connection error: {e}")
-            import sys
-            sys.print_exception(e)
-            error_msg = str(e)[:15]  # Truncate error message
-            self.update_display("ESP32", "Controller", "WS Error", error_msg)
+            self.update_display("ESP32", "Controller", "WS Error", str(e)[:16])
             return False
     
     def send_message(self, topic, value):
