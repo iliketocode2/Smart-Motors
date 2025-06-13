@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEEO Device Connector</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.8.2/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.8.2/core.js"></script>
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <!-- PyScript setup MUST be first, before any other PyScript elements -->
+    <script type="mpy-editor" src="./main.py" config="./pyscript.toml" env='su25' setup></script>
+    
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🔗 CEEO Device Connector</h1>
+            <p class="subtitle">Connect your microcontrollers wirelessly step by step</p>
+        </header>
+
+        <div class="main-layout">
+            <div class="layout-top">
+                <!-- Sidebar with Steps -->
+                <aside class="sidebar">
+                    <div class="sidebar-content">
+                        <h3>📋 Connection Steps</h3>
+                        <div class="steps-list">
+                            <div class="step-item active" id="step-1" data-step="1">
+                                <div class="step-number">1</div>
+                                <div class="step-info">
+                                    <h4>Choose Device</h4>
+                                    <p>Select your microcontroller</p>
+                                </div>
+                            </div>
+                            
+                            <div class="step-item" id="step-2" data-step="2">
+                                <div class="step-number">2</div>
+                                <div class="step-info">
+                                    <h4>Serial Connection</h4>
+                                    <p>Connect via USB</p>
+                                </div>
+                            </div>
+                            
+                            <div class="step-item" id="step-3" data-step="3">
+                                <div class="step-number">3</div>
+                                <div class="step-info">
+                                    <h4>Bluetooth Setup</h4>
+                                    <p>Connect wirelessly</p>
+                                </div>
+                            </div>
+                            
+                            <div class="step-item" id="step-4" data-step="4">
+                                <div class="step-number">4</div>
+                                <div class="step-info">
+                                    <h4>Channel Setup</h4>
+                                    <p>Create communication channel</p>
+                                </div>
+                            </div>
+                            
+                            <div class="step-item" id="step-5" data-step="5">
+                                <div class="step-number">5</div>
+                                <div class="step-info">
+                                    <h4>Second Device</h4>
+                                    <p>Connect another device</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Main Content Area -->
+                <main class="main-content">
+                <!-- Step 1: Device Selection -->
+                <section class="content-section active" id="content-step-1">
+                    <div class="section-header">
+                        <h2>Step 1: Choose Your Device Type</h2>
+                        <p>Select the microcontroller you want to connect</p>
+                    </div>
+                    
+                    <div class="device-grid">
+                        <div class="device-card" data-device="openmv">
+                            <div class="device-icon">📷</div>
+                            <h3>OpenMV Camera</h3>
+                            <p>Computer vision and image processing</p>
+                            <button id="loadopenmv" class="device-btn">Load OpenMV Code</button>
+                        </div>
+                        
+                        <div class="device-card" data-device="rp2040">
+                            <div class="device-icon">🔧</div>
+                            <h3>RP2040 / Pico</h3>
+                            <p>Raspberry Pi Pico with temperature sensor</p>
+                            <button id="loadrp2040" class="device-btn">Load RP2040 Code</button>
+                        </div>
+                        
+                        <div class="device-card" data-device="spike">
+                            <div class="device-icon">🧱</div>
+                            <h3>LEGO SPIKE</h3>
+                            <p>SPIKE Prime Hub with motion sensors</p>
+                            <button id="loadspike" class="device-btn">Load SPIKE Code</button>
+                        </div>
+                        
+                        <div class="device-card" data-device="esp32">
+                            <div class="device-icon">📡</div>
+                            <h3>ESP32</h3>
+                            <p>ESP32 with analog and digital pins</p>
+                            <button id="loadesp" class="device-btn">Load ESP32 Code</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 2: Serial Connection -->
+                <section class="content-section" id="content-step-2">
+                    <div class="section-header">
+                        <h2>Step 2: Serial Connection</h2>
+                        <p>Connect your device via USB and upload the selected code</p>
+                    </div>
+                    <div class="section-content">
+                        <div id='all_things_rs232'></div>
+                    </div>
+                </section>
+
+                <!-- Step 3: Bluetooth Connection -->
+                <section class="content-section" id="content-step-3">
+                    <div class="section-header">
+                        <h2>Step 3: Bluetooth Connection</h2>
+                        <p>Connect wirelessly to your device via Bluetooth</p>
+                    </div>
+                    <div class="section-content">
+                        <div id='all_things_ble'></div>
+                    </div>
+                </section>
+
+                <!-- Step 4: Channel Communication -->
+                <section class="content-section" id="content-step-4">
+                    <div class="section-header">
+                        <h2>Step 4: Channel Communication</h2>
+                        <p>Set up a channel for devices to communicate with each other</p>
+                    </div>
+                    <div class="section-content">
+                        <div id='all_things_channels'></div>
+                    </div>
+                    
+                    <!-- PC Code Interface moved here -->
+                    <div class="monitoring-card" style="margin-top: 30px;">
+                        <h3>💻 PC Code Interface</h3>
+                        <p style="text-align: center; color: #666; margin-bottom: 20px;">Configure how your computer handles device communication</p>
+                        <div class="code-controls">
+                            <button id='loaddefault' class="btn-secondary">Load Default Code</button>
+                            <button id='loadte' class="btn-secondary">Load Tech Elements Code</button>
+                        </div>
+                        <div class="pc-code-container">
+                            <script id='PC_code' type="mpy-editor" env='su25'>
+                                # PC code will be loaded here
+                            </script>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 5: Data Monitoring -->
+                <section class="content-section" id="content-step-5">
+                    <div class="section-header">
+                        <h2>Step 5: Live Data Monitoring 🎉</h2>
+                        <p>Your devices are connected! Monitor real-time data from your connected devices</p>
+                    </div>
+                    
+                    <div class="monitoring-card">
+                        <h3>📊 Live Data Visualization</h3>
+                        <div id='all_things_plotly'></div>
+                    </div>
+                </section>
+
+                <!-- Expandable Additional Tools -->
+                <div class="additional-tools">
+                    <details class="tool-section">
+                        <summary>🎵 Audio Tools</summary>
+                        <div id='all_things_audio'></div>
+                    </details>
+                    
+                    <details class="tool-section">
+                        <summary>📹 Video Tools</summary>
+                        <div id='all_things_video'></div>
+                    </details>
+                    
+                    <details class="tool-section">
+                        <summary>📁 File Management</summary>
+                        <div id='all_things_files'></div>
+                    </details>
+                </div>
+
+                <!-- Help Section -->
+                <div class="help-section">
+                    <details>
+                        <summary>❓ Need Help?</summary>
+                        <div class="help-content">
+                            <h4>Troubleshooting Tips:</h4>
+                            <ul>
+                                <li><strong>Serial not connecting?</strong> Make sure your device is plugged in and you're using Chrome/Edge browser</li>
+                                <li><strong>Bluetooth not working?</strong> Ensure your device is running the uploaded code and is discoverable</li>
+                                <li><strong>No data flowing?</strong> Check that both devices are connected to the same channel name</li>
+                                <li><strong>Multiple devices?</strong> Open this page in a new tab for each device you want to connect</li>
+                            </ul>
+                            
+                            <h4>Connection Order:</h4>
+                            <ol>
+                                <li>Select your device type and load the code</li>
+                                <li>Connect via Serial and upload the code to your device</li>
+                                <li>Connect via Bluetooth to establish wireless communication</li>
+                                <li>Set up a Channel with a unique name</li>
+                                <li>Repeat process in new tab for second device (using same channel name)</li>
+                            </ol>
+                        </div>
+                    </details>
+                </div>
+                            </main>
+            <!-- Connection Status Section -->
+            <div class="status-section">
+                <div class="connection-status">
+                    <h4>🔄 Connection Status</h4>
+                    <div class="status-indicators">
+                        <div class="status-item">
+                            <span class="status-dot" id="serial-indicator"></span>
+                            <span>Serial</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-dot" id="bluetooth-indicator"></span>
+                            <span>Bluetooth</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-dot" id="channel-indicator"></span>
+                            <span>Channel</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions moved here -->
+                    <div class="quick-actions">
+                        <button class="btn-primary" id="open-second-tab">
+                            🔗 New Device Tab
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+                <!-- Expandable Additional Tools -->
+                <div class="additional-tools">
+    </div>
+
+</body>
+</html>
