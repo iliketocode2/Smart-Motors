@@ -30,9 +30,9 @@ class SmartMotorController:
         self.last_heartbeat_time = 0
         self.reconnect_attempts = 0
         
-        print(f"SmartMotor {device_type} initialized")
-        print(f"Send topic: {self.message_handler.send_topic}")
-        print(f"Listen topic: {self.message_handler.listen_topic}")
+        print("SmartMotor {} initialized".format(device_type))
+        print("Send topic: {}".format(self.message_handler.send_topic))
+        print("Listen topic: {}".format(self.message_handler.listen_topic))
     
     def run(self):
         """Main execution loop with improved error recovery"""
@@ -66,7 +66,7 @@ class SmartMotorController:
                 self.connection_stable = True
                 return True
             
-            print(f"WebSocket connection attempt {attempt + 1} failed")
+            print("WebSocket connection attempt {} failed".format(attempt + 1))
             if attempt < config.MAX_RECONNECT_ATTEMPTS - 1:
                 time.sleep(config.RECONNECTION_DELAY_S)
         
@@ -114,7 +114,7 @@ class SmartMotorController:
                 time.sleep_ms(50)  # Small delay to prevent overwhelming
                 
             except Exception as e:
-                print(f"Sender thread error: {e}")
+                print("Sender thread error: {}".format(e))
                 time.sleep(1)
     
     def _message_receiver_loop(self):
@@ -130,6 +130,7 @@ class SmartMotorController:
                 # Receive and process messages
                 messages = self.websocket.receive_messages()
                 for message_str in messages:
+                    print("Raw message received: {}".format(message_str[:100]))
                     self._process_received_message(message_str)
                 
                 # Check connection health
@@ -141,7 +142,7 @@ class SmartMotorController:
                 time.sleep_ms(20)  # Small delay
                 
             except Exception as e:
-                print(f"Receiver loop error: {e}")
+                print("Receiver loop error: {}".format(e))
                 time.sleep(1)
     
     def _single_threaded_loop(self):
@@ -160,6 +161,7 @@ class SmartMotorController:
                 # Receive messages
                 messages = self.websocket.receive_messages()
                 for message_str in messages:
+                    print("Raw message received: {}".format(message_str[:100]))
                     self._process_received_message(message_str)
                 
                 # Send data based on device type
@@ -176,7 +178,7 @@ class SmartMotorController:
                 time.sleep_ms(100)
                 
             except Exception as e:
-                print(f"Single-threaded loop error: {e}")
+                print("Single-threaded loop error: {}".format(e))
                 time.sleep(1)
     
     def _handle_controller_sending(self, current_time):
@@ -192,7 +194,7 @@ class SmartMotorController:
             if self.websocket.send_message(message):
                 self.last_send_time = current_time
                 self.message_handler.update_controller_display(angle)
-                print(f"Sent potentiometer data: {angle}° (seq #{self.message_handler.get_sequence_number()})")
+                print("Sent potentiometer data: {}° (seq #{})".format(angle, self.message_handler.get_sequence_number()))
             else:
                 print("Failed to send potentiometer data")
                 self.connection_stable = False
@@ -204,7 +206,7 @@ class SmartMotorController:
             
             if self.websocket.send_message(message):
                 self.last_heartbeat_time = current_time
-                print(f"Sent heartbeat (seq #{self.message_handler.get_sequence_number()})")
+                print("Sent heartbeat (seq #{})".format(self.message_handler.get_sequence_number()))
             else:
                 print("Failed to send heartbeat")
                 self.connection_stable = False
@@ -219,7 +221,7 @@ class SmartMotorController:
             message = self.message_handler.create_data_message("status", angle)
             
             if self.websocket.send_message(message):
-                print(f"Sent servo status: {angle}° (seq #{self.message_handler.get_sequence_number()})")
+                print("Sent servo status: {}° (seq #{})".format(angle, self.message_handler.get_sequence_number()))
     
     def _attempt_reconnection(self):
         """Attempt to reconnect to WebSocket"""
@@ -227,8 +229,8 @@ class SmartMotorController:
             print("Max reconnection attempts reached")
             return False
         
-        print(f"Attempting reconnection #{self.reconnect_attempts + 1}")
-        self.hardware.update_display("SmartMotor", "Reconnecting", f"Attempt {self.reconnect_attempts + 1}", "")
+        print("Attempting reconnection #{}".format(self.reconnect_attempts + 1))
+        self.hardware.update_display("SmartMotor", "Reconnecting", "Attempt {}".format(self.reconnect_attempts + 1), "")
         
         self.reconnect_attempts += 1
         
@@ -275,6 +277,6 @@ if __name__ == "__main__":
         controller = SmartMotorController(DEVICE_MODE)
         controller.run()
     except Exception as e:
-        print(f"Fatal error: {e}")
+        print("Fatal error: {}".format(e))
     finally:
         print("SmartMotor controller stopped")
