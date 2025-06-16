@@ -17,7 +17,7 @@ class WiFiManager:
         
     def connect(self):
         """Connect to WiFi network with timeout and status updates"""
-        print(f"Connecting to WiFi: {config.WIFI_SSID}")
+        print("Connecting to WiFi: {}".format(config.WIFI_SSID))
         
         if self.hardware_manager:
             self.hardware_manager.update_display("SmartMotor", "WiFi", "Connecting...", "")
@@ -30,7 +30,7 @@ class WiFiManager:
             if self.wlan.isconnected():
                 self.ip_address = self.wlan.ifconfig()[0]
                 self.connected = True
-                print(f"Already connected to WiFi. IP: {self.ip_address}")
+                print("Already connected to WiFi. IP: {}".format(self.ip_address))
                 self._update_success_display()
                 return True
             
@@ -47,7 +47,7 @@ class WiFiManager:
                 # Update display every 5 seconds
                 if timeout_counter % 5 == 0 and self.hardware_manager:
                     self.hardware_manager.update_display(
-                        "SmartMotor", "WiFi", f"Connecting {timeout_counter}s", ""
+                        "SmartMotor", "WiFi", "Connecting {}s".format(timeout_counter), ""
                     )
             
             print()  # New line after dots
@@ -55,7 +55,7 @@ class WiFiManager:
             if self.wlan.isconnected():
                 self.ip_address = self.wlan.ifconfig()[0]
                 self.connected = True
-                print(f"WiFi connected successfully! IP: {self.ip_address}")
+                print("WiFi connected successfully! IP: {}".format(self.ip_address))
                 self._update_success_display()
                 return True
             else:
@@ -65,7 +65,7 @@ class WiFiManager:
                 
         except Exception as e:
             error_msg = str(e)[:10]
-            print(f"WiFi connection error: {e}")
+            print("WiFi connection error: {}".format(e))
             self._update_failure_display(error_msg)
             return False
     
