@@ -183,7 +183,7 @@ def update_connection_status():
     # Channel status - just update indicator, don't change connection logic
     channel_indicator = document.getElementById('channel-indicator')
     if channel_indicator:
-        if hasattr(myChannel, 'liveBtn') and myChannel.liveBtn.style.backgroundColor == 'green':
+        if hasattr(c_btn) and c_btn.innerText == 'disconnect':
             channel_indicator.classList.add('connected')
             channel_indicator.classList.remove('connecting')
             # Auto-advance to Monitoring step when Channel is connected
