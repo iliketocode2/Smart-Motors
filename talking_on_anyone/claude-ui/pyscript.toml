@@ -1,4 +1,4 @@
-name = "Talking on Anyone"
+name = "Alternative to Talking on Anyone"
 
 [files]
 "https://chrisrogers.pyscriptapps.com/talking-on-spike/latest/py/RS232.py" = ""
