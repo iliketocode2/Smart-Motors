@@ -34,7 +34,7 @@ class HardwareManager:
             self.display.show()
             print("Display initialized successfully")
         except Exception as e:
-            print(f"Display initialization failed: {e}")
+            print("Display initialization failed: {}".format(e))
             self.display = None
     
     def _setup_servo(self):
@@ -43,9 +43,9 @@ class HardwareManager:
             try:
                 self.servo = servo.Servo(Pin(config.SERVO_PIN))
                 self.servo.write_angle(90)  # Center position
-                print(f"Servo initialized on pin {config.SERVO_PIN}")
+                print("Servo initialized on pin {}".format(config.SERVO_PIN))
             except Exception as e:
-                print(f"Servo initialization failed: {e}")
+                print("Servo initialization failed: {}".format(e))
                 self.servo = None
     
     def _setup_potentiometer(self):
@@ -59,13 +59,13 @@ class HardwareManager:
                 test_value = self.potentiometer.read()
                 if 0 <= test_value <= 4095:
                     self.potentiometer_available = True
-                    print(f"Potentiometer initialized on pin {config.POTENTIOMETER_PIN}")
+                    print("Potentiometer initialized on pin {}".format(config.POTENTIOMETER_PIN))
                 else:
-                    print(f"Potentiometer test failed: {test_value}")
+                    print("Potentiometer test failed: {}".format(test_value))
                     self.potentiometer_available = False
                     
             except Exception as e:
-                print(f"Potentiometer initialization failed: {e}")
+                print("Potentiometer initialization failed: {}".format(e))
                 self.potentiometer_available = False
                 self.potentiometer = None
     
@@ -85,7 +85,7 @@ class HardwareManager:
                 self.display.text(line4[:16], 0, 55)
             self.display.show()
         except Exception as e:
-            print(f"Display update failed: {e}")
+            print("Display update failed: {}".format(e))
     
     def read_potentiometer(self):
         """Read potentiometer value with smoothing"""
@@ -115,14 +115,17 @@ class HardwareManager:
     def move_servo(self, angle):
         """Move servo to specified angle"""
         if not self.servo:
+            print("No servo available")
             return False
             
         try:
             angle = max(0, min(180, int(angle)))
+            print("Hardware: Moving servo to {}°".format(angle))
             self.servo.write_angle(angle)
+            print("Hardware: Servo movement completed")
             return True
         except Exception as e:
-            print(f"Servo movement error: {e}")
+            print("Servo movement error: {}".format(e))
             return False
     
     def cleanup(self):
