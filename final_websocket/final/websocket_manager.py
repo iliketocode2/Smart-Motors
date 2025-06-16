@@ -14,220 +14,200 @@ import config
 
 class WebSocketManager:
     def __init__(self, hardware_manager=None):
-        """Initialize WebSocket manager with improved stability"""
+        """Initialize WebSocket manager - back to original simple approach"""
         self.hardware_manager = hardware_manager
         self.socket = None
         self.connected = False
         self.receive_buffer = bytearray()
         self.connection_attempts = 0
-        self.last_activity = 0
+        self.last_activity = time.ticks_ms()
         
+    def generate_websocket_key(self):
+        """Generate WebSocket key exactly like original"""
+        key_bytes = bytes([urandom.getrandbits(8) for _ in range(16)])
+        return ubinascii.b2a_base64(key_bytes).decode().strip()
+    
     def connect(self):
-        """Establish WebSocket connection with improved handshake"""
+        """Establish WebSocket connection using original working logic"""
         try:
             if self.hardware_manager:
                 self.hardware_manager.update_display("SmartMotor", "WebSocket", "Connecting...", "")
             
-            print("Establishing WebSocket connection...")
+            print("Connecting to WebSocket...")
             
             # Clean up any existing connection
             self._cleanup_socket()
             
-            # Resolve host address
-            addr_info = socket.getaddrinfo(config.WS_HOST, config.WS_PORT)
-            if not addr_info:
-                raise Exception("Failed to resolve host")
+            # Reset connection state
+            self.connection_attempts = 0
+            self.last_activity = time.ticks_ms()
             
+            # Resolve address - exactly like original
+            addr_info = socket.getaddrinfo(config.WS_HOST, config.WS_PORT)
             addr = addr_info[0][-1]
             
-            # Create and configure raw socket
-            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            raw_socket.settimeout(15)  # Longer timeout for initial connection
+            # Create SSL socket - exactly like original
+            raw_sock = socket.socket()
+            raw_sock.settimeout(10)  # Set timeout for connection
+            raw_sock.connect(addr)
+            self.socket = ussl.wrap_socket(raw_sock, server_hostname=config.WS_HOST)
             
-            # Connect to server
-            raw_socket.connect(addr)
+            # WebSocket handshake - exactly like original
+            ws_key = self.generate_websocket_key()
+            handshake = (
+                "GET {} HTTP/1.1\r\n"
+                "Host: {}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "Sec-WebSocket-Key: {}\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "Origin: https://esp32-device\r\n"
+                "\r\n"
+            ).format(config.WS_PATH, config.WS_HOST, ws_key)
             
-            # Wrap with SSL
-            self.socket = ussl.wrap_socket(raw_socket, server_hostname=config.WS_HOST)
+            self.socket.write(handshake.encode())
             
-            # Perform WebSocket handshake
-            if self._perform_handshake():
-                self.connected = True
-                self.last_activity = time.ticks_ms()
-                self.receive_buffer = bytearray()
-                self.connection_attempts = 0
-                
-                print("WebSocket connected successfully")
+            # Read handshake response - exactly like original
+            response = b""
+            while b'\r\n\r\n' not in response:
+                chunk = self.socket.read(1024)
+                if not chunk:
+                    break
+                response += chunk
+            
+            if b"101 Switching Protocols" in response:
+                print("WebSocket connected successfully!")
                 if self.hardware_manager:
-                    self.hardware_manager.update_display("SmartMotor", "Connected", "WebSocket OK", "")
+                    self.hardware_manager.update_display("SmartMotor", "Connected", "Ready", "")
+                self.connected = True
+                self.receive_buffer = bytearray()  # Clear buffer
                 
-                # Force garbage collection after connection
+                # Initialize timing
+                current_time = time.ticks_ms()
+                self.last_activity = current_time
+                
+                # Force garbage collection
                 gc.collect()
                 return True
             else:
-                self._cleanup_socket()
+                print("WebSocket handshake failed")
+                if self.hardware_manager:
+                    self.hardware_manager.update_display("SmartMotor", "WS Failed", "Handshake", "")
                 return False
                 
         except Exception as e:
-            print(f"WebSocket connection failed: {e}")
+            print("WebSocket connection error: {}".format(e))
             if self.hardware_manager:
-                error_short = str(e)[:12]
-                self.hardware_manager.update_display("SmartMotor", "WS Failed", error_short, "")
-            
-            self._cleanup_socket()
-            return False
-    
-    def _perform_handshake(self):
-        """Perform WebSocket handshake with proper error handling"""
-        try:
-            # Generate WebSocket key
-            key_bytes = bytes([urandom.getrandbits(8) for _ in range(16)])
-            ws_key = ubinascii.b2a_base64(key_bytes).decode().strip()
-            
-            # Create handshake request
-            handshake_request = (
-                f"GET {config.WS_PATH} HTTP/1.1\r\n"
-                f"Host: {config.WS_HOST}\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                f"Sec-WebSocket-Key: {ws_key}\r\n"
-                "Sec-WebSocket-Version: 13\r\n"
-                "Origin: https://esp32-smartmotor\r\n"
-                "User-Agent: ESP32-SmartMotor/1.0\r\n"
-                "\r\n"
-            )
-            
-            # Send handshake
-            self.socket.write(handshake_request.encode())
-            
-            # Read response with timeout
-            response = b""
-            start_time = time.ticks_ms()
-            
-            while b'\r\n\r\n' not in response:
-                if time.ticks_diff(time.ticks_ms(), start_time) > 10000:  # 10 second timeout
-                    print("Handshake timeout")
-                    return False
-                
-                try:
-                    chunk = self.socket.read(512)
-                    if chunk:
-                        response += chunk
-                    else:
-                        time.sleep_ms(10)
-                except OSError:
-                    time.sleep_ms(10)
-            
-            # Validate response
-            response_str = response.decode('utf-8', 'ignore')
-            if "101 Switching Protocols" in response_str:
-                print("WebSocket handshake successful")
-                return True
-            else:
-                print(f"Handshake failed: {response_str[:100]}")
-                return False
-                
-        except Exception as e:
-            print(f"Handshake error: {e}")
+                error_str = str(e)[:12]
+                self.hardware_manager.update_display("SmartMotor", "WS Error", error_str, "")
             return False
     
     def send_message(self, message_dict):
-        """Send JSON message with optimized framing"""
+        """Send JSON message using original framing logic"""
         if not self.connected:
             return False
         
         try:
-            # Convert to JSON and encode
-            json_str = json.dumps(message_dict)
-            payload = json_str.encode('utf-8')
+            # Convert to JSON and encode - exactly like original
+            json_data = json.dumps(message_dict)
+            payload = json_data.encode('utf-8')
+            length = len(payload)
             
-            # Check message size
-            if len(payload) > config.MAX_MESSAGE_SIZE:
-                print(f"Message too large: {len(payload)} bytes")
+            # Limit message size
+            if length > config.MAX_MESSAGE_SIZE:
+                print("Message too large, skipping")
                 return False
             
-            # Create WebSocket frame
-            frame = self._create_text_frame(payload)
+            # Create WebSocket frame - exactly like original
+            frame = bytearray()
+            frame.append(0x81)  # FIN=1, opcode=1 (text)
             
-            # Send frame
+            # Generate mask key - exactly like original
+            mask_key = bytearray([urandom.getrandbits(8) for _ in range(4)])
+            
+            # Add length and mask bit - exactly like original
+            if length <= 125:
+                frame.append(0x80 | length)
+            elif length < 65536:
+                frame.append(0x80 | 126)
+                frame.extend(length.to_bytes(2, 'big'))
+            else:
+                return False  # Message too large
+            
+            # Add mask key
+            frame.extend(mask_key)
+            
+            # Mask and add payload - exactly like original
+            for i in range(length):
+                frame.append(payload[i] ^ mask_key[i % 4])
+            
+            # Send with error handling
             self.socket.write(frame)
             self.last_activity = time.ticks_ms()
             
             return True
             
         except Exception as e:
-            print(f"Send message error: {e}")
+            print("Send message error: {}".format(e))
             self.connected = False
             return False
     
-    def _create_text_frame(self, payload):
-        """Create WebSocket text frame with masking"""
-        frame = bytearray()
-        frame.append(0x81)  # FIN=1, opcode=1 (text)
-        
-        length = len(payload)
-        mask_key = bytearray([urandom.getrandbits(8) for _ in range(4)])
-        
-        # Add length
-        if length <= 125:
-            frame.append(0x80 | length)
-        elif length < 65536:
-            frame.append(0x80 | 126)
-            frame.extend(length.to_bytes(2, 'big'))
-        else:
-            raise ValueError("Message too large")
-        
-        # Add mask key
-        frame.extend(mask_key)
-        
-        # Mask and add payload
-        for i in range(length):
-            frame.append(payload[i] ^ mask_key[i % 4])
-        
-        return frame
-    
     def receive_messages(self):
-        """Receive and parse WebSocket messages"""
+        """Receive messages - exactly like original draft2.py"""
         if not self.connected:
             return []
         
         try:
-            # Read available data
+            # Try to read data
             data = self.socket.read(config.RECEIVE_CHUNK_SIZE)
-            if not data:
-                return []
-            
-            # Add to buffer
-            self.receive_buffer.extend(data)
-            self.last_activity = time.ticks_ms()
-            
-            # Prevent buffer overflow
-            if len(self.receive_buffer) > config.MAX_BUFFER_SIZE:
-                # Keep only recent data
-                self.receive_buffer = self.receive_buffer[-config.RECEIVE_CHUNK_SIZE:]
-            
-            # Extract complete messages
-            return self._extract_messages()
-            
-        except OSError:
-            # Normal timeout, no data available
-            return []
+            if data:
+                # Add to buffer
+                self.receive_buffer.extend(data)
+                
+                # Prevent buffer overflow
+                if len(self.receive_buffer) > config.MAX_BUFFER_SIZE:
+                    # Keep only the last part
+                    self.receive_buffer = self.receive_buffer[-config.RECEIVE_CHUNK_SIZE:]
+                
+                # Process complete messages
+                messages = self.extract_json_messages(self.receive_buffer)
+                for message in messages:
+                    print("Received message: {}".format(message[:100]))
+                return messages
+                
+        except OSError as e:
+            # Normal timeout - continue
+            pass
         except Exception as e:
-            print(f"Receive error: {e}")
+            print("Read error: {}".format(e))
             self.connected = False
-            return []
+        
+        return []
     
-    def _extract_messages(self):
-        """Extract complete JSON messages from buffer"""
+    def safe_decode(self, data):
+        """Safely decode bytes to string - from original draft2.py"""
+        try:
+            if isinstance(data, bytes):
+                return data.decode('utf-8', 'ignore')
+            elif isinstance(data, bytearray):
+                return bytes(data).decode('utf-8', 'ignore')
+            else:
+                return str(data)
+        except:
+            return ""
+    
+    def extract_json_messages(self, buffer):
+        """Extract JSON messages - EXACT copy from original draft2.py"""
         messages = []
         
         try:
-            # Convert buffer to string
-            text = self.receive_buffer.decode('utf-8', 'ignore')
+            text = self.safe_decode(buffer)
+            if not text:
+                return messages
             
-            # Find complete JSON objects
             start = 0
             while start < len(text):
+                # Find start of JSON object
                 json_start = text.find('{', start)
                 if json_start == -1:
                     break
@@ -247,25 +227,21 @@ class WebSocketManager:
                 
                 if json_end != -1:
                     json_str = text[json_start:json_end]
-                    try:
-                        # Validate JSON
-                        json.loads(json_str)
-                        messages.append(json_str)
-                    except:
-                        pass  # Skip invalid JSON
+                    messages.append(json_str)
                     start = json_end
                 else:
-                    # Incomplete JSON, keep remaining
+                    # Incomplete JSON - keep remaining for next time
                     remaining = text[json_start:].encode('utf-8')
                     self.receive_buffer = bytearray(remaining)
                     break
             
-            # Clear buffer if everything was processed
+            # If we processed everything, clear the buffer
             if start >= len(text):
                 self.receive_buffer = bytearray()
             
         except Exception as e:
-            print(f"Message extraction error: {e}")
+            print("Message extraction error: {}".format(e))
+            # Clear corrupted buffer
             self.receive_buffer = bytearray()
         
         return messages
