@@ -113,16 +113,13 @@ class HardwareManager:
             return 90
     
     def move_servo(self, angle):
-        """Move servo to specified angle"""
+        """Move servo to specified angle - streamlined for speed"""
         if not self.servo:
-            print("No servo available")
             return False
             
         try:
             angle = max(0, min(180, int(angle)))
-            print("Hardware: Moving servo to {}°".format(angle))
             self.servo.write_angle(angle)
-            print("Hardware: Servo movement completed")
             return True
         except Exception as e:
             print("Servo movement error: {}".format(e))
