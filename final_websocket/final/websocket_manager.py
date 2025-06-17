@@ -210,17 +210,9 @@ class WebSocketManager:
         """Safely decode bytes to string - improved version"""
         try:
             if isinstance(data, bytes):
-                # Try different approaches to decode
-                try:
-                    return data.decode('utf-8')
-                except UnicodeDecodeError:
-                    # Try ignoring errors
-                    return data.decode('utf-8', 'ignore')
+                return data.decode('utf-8')
             elif isinstance(data, bytearray):
-                try:
-                    return bytes(data).decode('utf-8')
-                except UnicodeDecodeError:
-                    return bytes(data).decode('utf-8', 'ignore')
+                return bytes(data).decode('utf-8')
             else:
                 return str(data)
         except Exception as e:
@@ -395,3 +387,4 @@ class WebSocketManager:
         """Close WebSocket connection"""
         print("Closing WebSocket connection")
         self._cleanup_socket()
+
