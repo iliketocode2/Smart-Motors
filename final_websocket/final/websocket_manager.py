@@ -14,13 +14,18 @@ import config
 
 class WebSocketManager:
     def __init__(self, hardware_manager=None):
-        """Initialize WebSocket manager - back to original simple approach"""
+        """Initialize WebSocket manager with complete message buffering"""
         self.hardware_manager = hardware_manager
         self.socket = None
         self.connected = False
         self.receive_buffer = bytearray()
         self.connection_attempts = 0
         self.last_activity = time.ticks_ms()
+        
+        # Complete message assembly
+        self.raw_accumulator = bytearray()  # Raw bytes until complete
+        self.max_message_size = 2048  # Maximum single message size
+        self.read_timeout_count = 0
         
     def generate_websocket_key(self):
         """Generate WebSocket key exactly like original"""
@@ -153,96 +158,209 @@ class WebSocketManager:
             return False
     
     def receive_messages(self):
-        """Receive messages - exactly like original draft2.py"""
+        """Debug version to see exactly what we're receiving"""
         if not self.connected:
             return []
+        
+        messages = []
         
         try:
             # Try to read data
             data = self.socket.read(config.RECEIVE_CHUNK_SIZE)
+            
             if data:
-                # Add to buffer
-                self.receive_buffer.extend(data)
+                print("Raw data ({} bytes): {}".format(len(data), data[:80]))
                 
-                # Prevent buffer overflow
-                if len(self.receive_buffer) > config.MAX_BUFFER_SIZE:
-                    # Keep only the last part
-                    self.receive_buffer = self.receive_buffer[-config.RECEIVE_CHUNK_SIZE:]
+                self.raw_accumulator.extend(data)
+                print("Accumulator now {} bytes".format(len(self.raw_accumulator)))
                 
-                # Process complete messages
-                messages = self.extract_json_messages(self.receive_buffer)
-                for message in messages:
-                    print("Received message: {}".format(message[:100]))
-                return messages
+                # Show what the accumulated data looks like as text
+                try:
+                    text_view = self.safe_decode(self.raw_accumulator)
+                    print("Accumulated text: {}".format(text_view[:150]))
+                except:
+                    print("Could not decode accumulated data")
                 
-        except OSError as e:
-            # Normal timeout - continue
+                # Prevent unlimited buffer growth
+                if len(self.raw_accumulator) > self.max_message_size:
+                    print("Buffer too large ({} bytes), clearing".format(len(self.raw_accumulator)))
+                    self.raw_accumulator = bytearray()
+                    return []
+                
+                # Try to extract messages from current buffer
+                messages = self.extract_complete_json_messages()
+                
+                if messages:
+                    print("Extracted {} messages".format(len(messages)))
+                    # Clear buffer after successful extraction
+                    self.raw_accumulator = bytearray()
+                else:
+                    print("No complete messages found yet")
+                
+        except OSError:
+            # Normal timeout
             pass
         except Exception as e:
-            print("Read error: {}".format(e))
+            print("Receive error: {}".format(e))
             self.connected = False
         
-        return []
+        return messages
     
     def safe_decode(self, data):
-        """Safely decode bytes to string - from original draft2.py"""
+        """Safely decode bytes to string - improved version"""
         try:
             if isinstance(data, bytes):
-                return data.decode('utf-8', 'ignore')
+                # Try different approaches to decode
+                try:
+                    return data.decode('utf-8')
+                except UnicodeDecodeError:
+                    # Try ignoring errors
+                    return data.decode('utf-8', 'ignore')
             elif isinstance(data, bytearray):
-                return bytes(data).decode('utf-8', 'ignore')
+                try:
+                    return bytes(data).decode('utf-8')
+                except UnicodeDecodeError:
+                    return bytes(data).decode('utf-8', 'ignore')
             else:
                 return str(data)
-        except:
-            return ""
+        except Exception as e:
+            print("Decode error: {}".format(e))
+            # Last resort: extract only printable characters
+            result = ""
+            for byte in data:
+                if 32 <= byte <= 126:  # Printable ASCII
+                    result += chr(byte)
+            return result
     
-    def extract_json_messages(self, buffer):
-        """Extract JSON messages - EXACT copy from original draft2.py"""
+    def has_complete_messages(self):
+        """Check if buffer contains what looks like complete CEEO messages"""
+        try:
+            text = self.safe_decode(self.raw_accumulator)
+            
+            # Look for complete CEEO message patterns
+            # A complete message should have: {"client_id":"...","type":"...","payload":"..."}
+            
+            # Count opening and closing braces to see if we have complete JSON
+            open_braces = text.count('{')
+            close_braces = text.count('}')
+            
+            # For CEEO messages, we typically need at least 2 levels of nesting
+            # Outer: {"client_id":...}
+            # Inner: {"topic":...} in payload
+            
+            if open_braces >= 2 and close_braces >= 2 and open_braces == close_braces:
+                # Look for specific CEEO patterns
+                if ('{"client_id"' in text and '"type":"data"' in text and 
+                    '"payload"' in text and text.count('}}') >= 1):
+                    return True
+                elif '{"client_id"' in text and '"type":"welcome"' in text:
+                    return True
+            
+            return False
+            
+        except:
+            return False
+    
+    def extract_complete_json_messages(self):
+        """Debug version focusing on the actual data patterns we see"""
         messages = []
         
         try:
-            text = self.safe_decode(buffer)
+            # First, try to decode the buffer
+            text = self.safe_decode(self.raw_accumulator)
             if not text:
-                return messages
+                print("DECODE FAILED - trying byte-by-byte extraction")
+                # Extract readable characters directly from bytes
+                text = ""
+                for byte in self.raw_accumulator:
+                    if 32 <= byte <= 126:  # Printable ASCII
+                        text += chr(byte)
+                
+                if not text:
+                    print("No printable characters found in buffer")
+                    return messages
             
-            start = 0
-            while start < len(text):
-                # Find start of JSON object
-                json_start = text.find('{', start)
+            print("Decoded text ({} chars): {}".format(len(text), text[:200]))
+            
+            # The debug shows messages start with 'T{"client_id"' 
+            # The 'T' is likely a WebSocket frame type byte, so remove it
+            if text.startswith('T{"client_id"'):
+                text = text[1:]  # Remove the 'T'
+                print("Removed leading 'T', new text: {}".format(text[:200]))
+            
+            # Look for complete JSON messages
+            # Pattern we're seeing: {"client_id":"...","type":"data","payload":"..."}
+            
+            pos = 0
+            while pos < len(text):
+                # Find start of JSON message
+                json_start = text.find('{"client_id"', pos)
                 if json_start == -1:
+                    print("No more JSON start patterns found")
                     break
                 
-                # Find matching closing brace
+                print("Found JSON start at position {}".format(json_start))
+                
+                # Find the end by balancing braces
                 brace_count = 0
                 json_end = -1
                 
                 for i in range(json_start, len(text)):
-                    if text[i] == '{':
+                    char = text[i]
+                    if char == '{':
                         brace_count += 1
-                    elif text[i] == '}':
+                    elif char == '}':
                         brace_count -= 1
                         if brace_count == 0:
                             json_end = i + 1
                             break
                 
-                if json_end != -1:
-                    json_str = text[json_start:json_end]
-                    messages.append(json_str)
-                    start = json_end
-                else:
-                    # Incomplete JSON - keep remaining for next time
-                    remaining = text[json_start:].encode('utf-8')
-                    self.receive_buffer = bytearray(remaining)
-                    break
-            
-            # If we processed everything, clear the buffer
-            if start >= len(text):
-                self.receive_buffer = bytearray()
+                if json_end == -1:
+                    print("No complete JSON found (unbalanced braces)")
+                    # Look for next occurrence
+                    next_start = text.find('{"client_id"', json_start + 1)
+                    if next_start != -1:
+                        pos = next_start
+                        continue
+                    else:
+                        break
+                
+                print("Found JSON end at position {}".format(json_end))
+                
+                # Extract the message
+                message_text = text[json_start:json_end]
+                print("Extracted message ({} chars): {}".format(len(message_text), message_text[:150]))
+                
+                try:
+                    # Validate JSON
+                    parsed = json.loads(message_text)
+                    messages.append(message_text)
+                    
+                    msg_type = parsed.get('type', 'unknown')
+                    print("SUCCESS! Valid JSON: type={}".format(msg_type))
+                    
+                    # Show payload details for data messages
+                    if msg_type == 'data' and 'payload' in parsed:
+                        try:
+                            payload = json.loads(parsed['payload'])
+                            topic = payload.get('topic', '')
+                            print("  Topic: {}".format(topic))
+                            
+                            # Show potentiometer data if present
+                            if 'potentiometer_angle' in payload.get('value', {}):
+                                angle = payload['value']['potentiometer_angle']
+                                print("  Potentiometer: {}°".format(angle))
+                        except Exception as e:
+                            print("  Payload parse error: {}".format(e))
+                    
+                except Exception as e:
+                    print("JSON validation failed: {}".format(e))
+                    print("Raw message: '{}'".format(message_text))
+                
+                pos = json_end
             
         except Exception as e:
-            print("Message extraction error: {}".format(e))
-            # Clear corrupted buffer
-            self.receive_buffer = bytearray()
+            print("Extraction error: {}".format(e))
         
         return messages
     
@@ -270,6 +388,7 @@ class WebSocketManager:
         
         self.connected = False
         self.receive_buffer = bytearray()
+        self.raw_accumulator = bytearray()
         gc.collect()
     
     def close(self):
