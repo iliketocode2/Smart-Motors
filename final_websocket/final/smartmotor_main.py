@@ -129,9 +129,15 @@ class SmartMotorController:
                 
                 # Receive and process messages
                 messages = self.websocket.receive_messages()
-                for message_str in messages:
-                    print("Raw message received: {}".format(message_str[:100]))
-                    self._process_received_message(message_str)
+                for message_data in messages:
+                    # Handle both fragment dict and complete JSON string
+                    if isinstance(message_data, dict):
+                        # Fragment message
+                        self._process_received_message(message_data)
+                    else:
+                        # Complete JSON message
+                        print("Raw message received: {}".format(message_data[:100]))
+                        self._process_received_message(message_data)
                 
                 # Check connection health
                 if not self.websocket.is_connected():
@@ -160,9 +166,15 @@ class SmartMotorController:
                 
                 # Receive messages
                 messages = self.websocket.receive_messages()
-                for message_str in messages:
-                    print("Raw message received: {}".format(message_str[:100]))
-                    self._process_received_message(message_str)
+                for message_data in messages:
+                    # Handle both fragment dict and complete JSON string
+                    if isinstance(message_data, dict):
+                        # Fragment message
+                        self._process_received_message(message_data)
+                    else:
+                        # Complete JSON message
+                        print("Raw message received: {}".format(message_data[:100]))
+                        self._process_received_message(message_data)
                 
                 # Send data based on device type
                 if self.device_type == config.DEVICE_CONTROLLER:
@@ -182,46 +194,48 @@ class SmartMotorController:
                 time.sleep(1)
     
     def _handle_controller_sending(self, current_time):
-        """Handle sending for controller device"""
+        """Handle sending for controller device - simplified"""
         if time.ticks_diff(current_time, self.last_send_time) < config.SEND_INTERVAL_MS:
             return
         
         should_send, angle = self.message_handler.should_send_potentiometer_data()
         
         if should_send:
-            message = self.message_handler.create_data_message("data", angle)
+            message = self.message_handler.create_data_message(angle)
             
             if self.websocket.send_message(message):
                 self.last_send_time = current_time
-                self.message_handler.update_controller_display(angle)
-                print("Sent potentiometer data: {}° (seq #{})".format(angle, self.message_handler.get_sequence_number()))
+                print("Sent angle: {}°".format(angle))
             else:
-                print("Failed to send potentiometer data")
+                print("Failed to send angle")
                 self.connection_stable = False
     
     def _send_heartbeat_if_needed(self, current_time):
-        """Send heartbeat message if interval has elapsed"""
+        """Send heartbeat message if interval has elapsed - simplified"""
         if time.ticks_diff(current_time, self.last_heartbeat_time) > config.HEARTBEAT_INTERVAL_MS:
             message = self.message_handler.create_heartbeat_message()
             
             if self.websocket.send_message(message):
                 self.last_heartbeat_time = current_time
-                print("Sent heartbeat (seq #{})".format(self.message_handler.get_sequence_number()))
+                print("Heartbeat sent")
             else:
-                print("Failed to send heartbeat")
+                print("Heartbeat failed")
                 self.connection_stable = False
     
-    def _process_received_message(self, message_str):
-        """Process a received message"""
-        action = self.message_handler.process_received_message(message_str)
-        
-        if action and action.get('action') == 'send_servo_status':
-            # Receiver device sending servo status back
-            angle = action['angle']
-            message = self.message_handler.create_data_message("status", angle)
+    def _process_received_message(self, message_data):
+        """Process a received message - simplified"""
+        try:
+            action = self.message_handler.process_received_message(message_data)
             
-            if self.websocket.send_message(message):
-                print("Sent servo status: {}° (seq #{})".format(angle, self.message_handler.get_sequence_number()))
+            if action and action.get('action') == 'send_confirmation':
+                # Receiver sending confirmation back
+                angle = action['angle']
+                message = self.message_handler.create_data_message(angle)
+                
+                if self.websocket.send_message(message):
+                    print("Confirmed: {}°".format(angle))
+        except Exception as e:
+            print("Process error: {}".format(e))
     
     def _attempt_reconnection(self):
         """Attempt to reconnect to WebSocket"""
