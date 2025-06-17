@@ -158,44 +158,40 @@ class WebSocketManager:
             return False
     
     def receive_messages(self):
-        """Debug version to see exactly what we're receiving"""
+        """Conservative approach - prioritize stability over speed"""
         if not self.connected:
             return []
         
-        messages = []
-        
         try:
-            # Try to read data
+            # Read data
             data = self.socket.read(config.RECEIVE_CHUNK_SIZE)
-            
             if data:
-                print("Raw data ({} bytes): {}".format(len(data), data[:80]))
-                
                 self.raw_accumulator.extend(data)
-                print("Accumulator now {} bytes".format(len(self.raw_accumulator)))
                 
-                # Show what the accumulated data looks like as text
-                try:
-                    text_view = self.safe_decode(self.raw_accumulator)
-                    print("Accumulated text: {}".format(text_view[:150]))
-                except:
-                    print("Could not decode accumulated data")
-                
-                # Prevent unlimited buffer growth
-                if len(self.raw_accumulator) > self.max_message_size:
-                    print("Buffer too large ({} bytes), clearing".format(len(self.raw_accumulator)))
-                    self.raw_accumulator = bytearray()
-                    return []
-                
-                # Try to extract messages from current buffer
-                messages = self.extract_complete_json_messages()
-                
-                if messages:
-                    print("Extracted {} messages".format(len(messages)))
-                    # Clear buffer after successful extraction
-                    self.raw_accumulator = bytearray()
-                else:
-                    print("No complete messages found yet")
+                # Use conservative threshold - wait for more complete data
+                if len(self.raw_accumulator) > 400:  # Back to stable threshold
+                    
+                    messages = self.extract_complete_json_messages()
+                    if messages:
+                        # Conservative buffer management - only clear processed parts
+                        text = self.safe_decode(self.raw_accumulator)
+                        if text:
+                            # Find last complete message end
+                            last_end = text.rfind('}}')
+                            if last_end != -1:
+                                # Keep remainder after last complete message
+                                remainder = text[last_end + 2:].strip()
+                                if remainder:
+                                    self.raw_accumulator = bytearray(remainder.encode('utf-8'))
+                                else:
+                                    self.raw_accumulator = bytearray()
+                            else:
+                                self.raw_accumulator = bytearray()
+                        return messages
+                    
+                    # Clear buffer if it gets too large without finding messages
+                    elif len(self.raw_accumulator) > self.max_message_size:
+                        self.raw_accumulator = bytearray()
                 
         except OSError:
             # Normal timeout
@@ -204,10 +200,73 @@ class WebSocketManager:
             print("Receive error: {}".format(e))
             self.connected = False
         
-        return messages
+        return []
+    
+    def extract_fragment_data(self):
+        """Extract essential data from fragments - handle both old and new topic formats"""
+        try:
+            # Convert buffer to text
+            text = self.safe_decode(self.raw_accumulator)
+            if not text:
+                return []
+            
+            # Look for controller data - handle both formats
+            if ('/controller/data' in text or '/controller/status' in text) and 'value' in text:
+                angle = self._extract_angle_from_text(text)
+                if angle is not None:
+                    print("Fragment: {}°".format(angle))
+                    return [{
+                        'type': 'fragment',
+                        'topic': '/controller/data',  # Normalize to new format
+                        'potentiometer_angle': angle
+                    }]
+            
+            # Look for receiver data - handle both formats
+            if ('/receiver/data' in text or '/receiver/status' in text) and 'value' in text:
+                angle = self._extract_angle_from_text(text)
+                if angle is not None:
+                    print("Fragment servo: {}°".format(angle))
+                    return [{
+                        'type': 'fragment',
+                        'topic': '/receiver/data',  # Normalize to new format
+                        'servo_angle': angle
+                    }]
+            
+        except Exception as e:
+            pass
+        
+        return []
+    
+    def _extract_angle_from_text(self, text):
+        """Quickly extract angle value from text"""
+        try:
+            # Look for "value": followed by a number
+            value_pos = text.find('"value":')
+            if value_pos != -1:
+                # Find the number after "value":
+                start = value_pos + 8  # Length of "value":
+                end = start
+                
+                # Skip whitespace and potential quotes
+                while end < len(text) and text[end] in ' "':
+                    end += 1
+                
+                # Extract digits
+                num_start = end
+                while end < len(text) and (text[end].isdigit() or text[end] == '.'):
+                    end += 1
+                
+                if end > num_start:
+                    angle_str = text[num_start:end]
+                    return int(float(angle_str))
+            
+        except Exception as e:
+            pass
+        
+        return None
     
     def safe_decode(self, data):
-        """Safely decode bytes to string - improved version"""
+        """Safely decode bytes to string - MicroPython compatible with fixed error handling"""
         try:
             if isinstance(data, bytes):
                 return data.decode('utf-8')
@@ -215,9 +274,9 @@ class WebSocketManager:
                 return bytes(data).decode('utf-8')
             else:
                 return str(data)
-        except Exception as e:
+        except (Exception, NameError) as e:
             print("Decode error: {}".format(e))
-            # Last resort: extract only printable characters
+            # Extract printable characters directly
             result = ""
             for byte in data:
                 if 32 <= byte <= 126:  # Printable ASCII
@@ -254,46 +313,28 @@ class WebSocketManager:
             return False
     
     def extract_complete_json_messages(self):
-        """Debug version focusing on the actual data patterns we see"""
+        """Back to reliable extraction - no fragment processing"""
         messages = []
         
         try:
-            # First, try to decode the buffer
+            # Decode buffer
             text = self.safe_decode(self.raw_accumulator)
-            if not text:
-                print("DECODE FAILED - trying byte-by-byte extraction")
-                # Extract readable characters directly from bytes
-                text = ""
-                for byte in self.raw_accumulator:
-                    if 32 <= byte <= 126:  # Printable ASCII
-                        text += chr(byte)
-                
-                if not text:
-                    print("No printable characters found in buffer")
-                    return messages
+            if not text or len(text) < 100:
+                return messages
             
-            print("Decoded text ({} chars): {}".format(len(text), text[:200]))
-            
-            # The debug shows messages start with 'T{"client_id"' 
-            # The 'T' is likely a WebSocket frame type byte, so remove it
+            # Remove leading 'T' if present
             if text.startswith('T{"client_id"'):
-                text = text[1:]  # Remove the 'T'
-                print("Removed leading 'T', new text: {}".format(text[:200]))
+                text = text[1:]
             
-            # Look for complete JSON messages
-            # Pattern we're seeing: {"client_id":"...","type":"data","payload":"..."}
-            
+            # Look for complete JSON messages using reliable brace counting
             pos = 0
             while pos < len(text):
                 # Find start of JSON message
                 json_start = text.find('{"client_id"', pos)
                 if json_start == -1:
-                    print("No more JSON start patterns found")
                     break
                 
-                print("Found JSON start at position {}".format(json_start))
-                
-                # Find the end by balancing braces
+                # Find the end by balancing braces carefully
                 brace_count = 0
                 json_end = -1
                 
@@ -307,52 +348,28 @@ class WebSocketManager:
                             json_end = i + 1
                             break
                 
-                if json_end == -1:
-                    print("No complete JSON found (unbalanced braces)")
-                    # Look for next occurrence
-                    next_start = text.find('{"client_id"', json_start + 1)
-                    if next_start != -1:
-                        pos = next_start
-                        continue
-                    else:
-                        break
-                
-                print("Found JSON end at position {}".format(json_end))
-                
-                # Extract the message
-                message_text = text[json_start:json_end]
-                print("Extracted message ({} chars): {}".format(len(message_text), message_text[:150]))
-                
-                try:
-                    # Validate JSON
-                    parsed = json.loads(message_text)
-                    messages.append(message_text)
+                if json_end != -1:
+                    # Extract complete message
+                    message_text = text[json_start:json_end]
                     
-                    msg_type = parsed.get('type', 'unknown')
-                    print("SUCCESS! Valid JSON: type={}".format(msg_type))
-                    
-                    # Show payload details for data messages
-                    if msg_type == 'data' and 'payload' in parsed:
+                    # Only process substantial messages
+                    if len(message_text) > 100:
                         try:
-                            payload = json.loads(parsed['payload'])
-                            topic = payload.get('topic', '')
-                            print("  Topic: {}".format(topic))
-                            
-                            # Show potentiometer data if present
-                            if 'potentiometer_angle' in payload.get('value', {}):
-                                angle = payload['value']['potentiometer_angle']
-                                print("  Potentiometer: {}°".format(angle))
-                        except Exception as e:
-                            print("  Payload parse error: {}".format(e))
+                            # Validate JSON
+                            parsed = json.loads(message_text)
+                            messages.append(message_text)
+                        except:
+                            # Skip invalid JSON silently
+                            pass
                     
-                except Exception as e:
-                    print("JSON validation failed: {}".format(e))
-                    print("Raw message: '{}'".format(message_text))
-                
-                pos = json_end
+                    pos = json_end
+                else:
+                    # No complete message found
+                    break
             
-        except Exception as e:
-            print("Extraction error: {}".format(e))
+        except:
+            # Silent error handling
+            pass
         
         return messages
     
@@ -387,4 +404,3 @@ class WebSocketManager:
         """Close WebSocket connection"""
         print("Closing WebSocket connection")
         self._cleanup_socket()
-
