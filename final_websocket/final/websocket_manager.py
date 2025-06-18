@@ -1,6 +1,10 @@
 """
-WebSocket connection manager optimized for stability
-Handles connection, message framing, and error recovery
+WebSocket connection manager OPTIMIZED for CEEO channel persistence
+Key fixes for channel subscription persistence:
+- Immediate state sync after reconnection
+- Lightweight keepalive messages
+- Better connection health monitoring  
+- Proper channel re-subscription handling
 """
 
 import socket
@@ -14,26 +18,33 @@ import config
 
 class WebSocketManager:
     def __init__(self, hardware_manager=None):
-        """Initialize WebSocket manager with complete message buffering"""
+        """Initialize WebSocket manager optimized for channel persistence"""
         self.hardware_manager = hardware_manager
         self.socket = None
         self.connected = False
-        self.receive_buffer = bytearray()
         self.connection_attempts = 0
         self.last_activity = time.ticks_ms()
         
-        # Complete message assembly
-        self.raw_accumulator = bytearray()  # Raw bytes until complete
-        self.max_message_size = 2048  # Maximum single message size
-        self.read_timeout_count = 0
+        # CRITICAL: Track channel subscription state
+        self.channel_subscribed = False
+        self.last_data_sent = 0
+        self.last_data_received = 0
+        
+        # Optimized buffer management for channel persistence
+        self.raw_accumulator = bytearray(800)  # Medium size to handle channel messages
+        self.accumulator_len = 0
+        self.max_message_size = 800
+        
+        # Pre-allocate buffers
+        self.read_buffer = bytearray(256)
         
     def generate_websocket_key(self):
-        """Generate WebSocket key exactly like original"""
+        """Generate WebSocket key"""
         key_bytes = bytes([urandom.getrandbits(8) for _ in range(16)])
         return ubinascii.b2a_base64(key_bytes).decode().strip()
     
     def connect(self):
-        """Establish WebSocket connection using original working logic"""
+        """Establish WebSocket connection with channel subscription tracking"""
         try:
             if self.hardware_manager:
                 self.hardware_manager.update_display("SmartMotor", "WebSocket", "Connecting...", "")
@@ -43,21 +54,23 @@ class WebSocketManager:
             # Clean up any existing connection
             self._cleanup_socket()
             
-            # Reset connection state
+            # Reset connection AND channel state
             self.connection_attempts = 0
             self.last_activity = time.ticks_ms()
+            self.accumulator_len = 0
+            self.channel_subscribed = False  # CRITICAL: Reset channel subscription
             
-            # Resolve address - exactly like original
+            # Resolve address
             addr_info = socket.getaddrinfo(config.WS_HOST, config.WS_PORT)
             addr = addr_info[0][-1]
             
-            # Create SSL socket - exactly like original
+            # Create SSL socket
             raw_sock = socket.socket()
-            raw_sock.settimeout(10)  # Set timeout for connection
+            raw_sock.settimeout(10)
             raw_sock.connect(addr)
             self.socket = ussl.wrap_socket(raw_sock, server_hostname=config.WS_HOST)
             
-            # WebSocket handshake - exactly like original
+            # WebSocket handshake
             ws_key = self.generate_websocket_key()
             handshake = (
                 "GET {} HTTP/1.1\r\n"
@@ -72,7 +85,7 @@ class WebSocketManager:
             
             self.socket.write(handshake.encode())
             
-            # Read handshake response - exactly like original
+            # Read handshake response
             response = b""
             while b'\r\n\r\n' not in response:
                 chunk = self.socket.read(1024)
@@ -85,13 +98,13 @@ class WebSocketManager:
                 if self.hardware_manager:
                     self.hardware_manager.update_display("SmartMotor", "Connected", "Ready", "")
                 self.connected = True
-                self.receive_buffer = bytearray()  # Clear buffer
                 
                 # Initialize timing
                 current_time = time.ticks_ms()
                 self.last_activity = current_time
+                self.last_data_sent = current_time  # Initialize data timing
+                self.last_data_received = current_time
                 
-                # Force garbage collection
                 gc.collect()
                 return True
             else:
@@ -108,47 +121,48 @@ class WebSocketManager:
             return False
     
     def send_message(self, message_dict):
-        """Send JSON message using original framing logic"""
+        """Send JSON message with activity tracking"""
         if not self.connected:
             return False
         
         try:
-            # Convert to JSON and encode - exactly like original
             json_data = json.dumps(message_dict)
             payload = json_data.encode('utf-8')
             length = len(payload)
             
-            # Limit message size
+            # CRITICAL: Check for network rate limiting
             if length > config.MAX_MESSAGE_SIZE:
                 print("Message too large, skipping")
                 return False
             
-            # Create WebSocket frame - exactly like original
+            # Create WebSocket frame
             frame = bytearray()
             frame.append(0x81)  # FIN=1, opcode=1 (text)
             
-            # Generate mask key - exactly like original
+            # Generate mask key
             mask_key = bytearray([urandom.getrandbits(8) for _ in range(4)])
             
-            # Add length and mask bit - exactly like original
+            # Add length and mask bit
             if length <= 125:
                 frame.append(0x80 | length)
             elif length < 65536:
                 frame.append(0x80 | 126)
                 frame.extend(length.to_bytes(2, 'big'))
             else:
-                return False  # Message too large
+                return False
             
             # Add mask key
             frame.extend(mask_key)
             
-            # Mask and add payload - exactly like original
+            # Mask and add payload
             for i in range(length):
                 frame.append(payload[i] ^ mask_key[i % 4])
             
-            # Send with error handling
+            # Send with activity tracking
             self.socket.write(frame)
-            self.last_activity = time.ticks_ms()
+            current_time = time.ticks_ms()
+            self.last_activity = current_time
+            self.last_data_sent = current_time  # Track data sending
             
             return True
             
@@ -158,40 +172,36 @@ class WebSocketManager:
             return False
     
     def receive_messages(self):
-        """Conservative approach - prioritize stability over speed"""
+        """Optimized message processing with channel persistence tracking"""
         if not self.connected:
             return []
         
         try:
-            # Read data
-            data = self.socket.read(config.RECEIVE_CHUNK_SIZE)
-            if data:
-                self.raw_accumulator.extend(data)
+            bytes_read = self.socket.readinto(self.read_buffer)
+            if bytes_read:
+                # Manage buffer efficiently
+                if self.accumulator_len + bytes_read > len(self.raw_accumulator):
+                    # Buffer management: keep recent data, discard old
+                    keep_size = len(self.raw_accumulator) // 2
+                    self.raw_accumulator[:keep_size] = self.raw_accumulator[self.accumulator_len - keep_size:self.accumulator_len]
+                    self.accumulator_len = keep_size
                 
-                # Use conservative threshold - wait for more complete data
-                if len(self.raw_accumulator) > 400:  # Back to stable threshold
-                    
-                    messages = self.extract_complete_json_messages()
+                # Copy new data
+                self.raw_accumulator[self.accumulator_len:self.accumulator_len + bytes_read] = self.read_buffer[:bytes_read]
+                self.accumulator_len += bytes_read
+                
+                # Process messages with lower threshold for responsiveness
+                if self.accumulator_len > 120:  # Lower threshold
+                    messages = self.extract_complete_json_messages_fast()
                     if messages:
-                        # Conservative buffer management - only clear processed parts
-                        text = self.safe_decode(self.raw_accumulator)
-                        if text:
-                            # Find last complete message end
-                            last_end = text.rfind('}}')
-                            if last_end != -1:
-                                # Keep remainder after last complete message
-                                remainder = text[last_end + 2:].strip()
-                                if remainder:
-                                    self.raw_accumulator = bytearray(remainder.encode('utf-8'))
-                                else:
-                                    self.raw_accumulator = bytearray()
-                            else:
-                                self.raw_accumulator = bytearray()
+                        # Track data reception
+                        self.last_data_received = time.ticks_ms()
+                        self._compact_buffer_after_processing()
                         return messages
                     
-                    # Clear buffer if it gets too large without finding messages
-                    elif len(self.raw_accumulator) > self.max_message_size:
-                        self.raw_accumulator = bytearray()
+                    # Aggressive buffer management
+                    elif self.accumulator_len > self.max_message_size:
+                        self.accumulator_len = 0
                 
         except OSError:
             # Normal timeout
@@ -202,139 +212,28 @@ class WebSocketManager:
         
         return []
     
-    def extract_fragment_data(self):
-        """Extract essential data from fragments - handle both old and new topic formats"""
-        try:
-            # Convert buffer to text
-            text = self.safe_decode(self.raw_accumulator)
-            if not text:
-                return []
-            
-            # Look for controller data - handle both formats
-            if ('/controller/data' in text or '/controller/status' in text) and 'value' in text:
-                angle = self._extract_angle_from_text(text)
-                if angle is not None:
-                    print("Fragment: {}°".format(angle))
-                    return [{
-                        'type': 'fragment',
-                        'topic': '/controller/data',  # Normalize to new format
-                        'potentiometer_angle': angle
-                    }]
-            
-            # Look for receiver data - handle both formats
-            if ('/receiver/data' in text or '/receiver/status' in text) and 'value' in text:
-                angle = self._extract_angle_from_text(text)
-                if angle is not None:
-                    print("Fragment servo: {}°".format(angle))
-                    return [{
-                        'type': 'fragment',
-                        'topic': '/receiver/data',  # Normalize to new format
-                        'servo_angle': angle
-                    }]
-            
-        except Exception as e:
-            pass
-        
-        return []
-    
-    def _extract_angle_from_text(self, text):
-        """Quickly extract angle value from text"""
-        try:
-            # Look for "value": followed by a number
-            value_pos = text.find('"value":')
-            if value_pos != -1:
-                # Find the number after "value":
-                start = value_pos + 8  # Length of "value":
-                end = start
-                
-                # Skip whitespace and potential quotes
-                while end < len(text) and text[end] in ' "':
-                    end += 1
-                
-                # Extract digits
-                num_start = end
-                while end < len(text) and (text[end].isdigit() or text[end] == '.'):
-                    end += 1
-                
-                if end > num_start:
-                    angle_str = text[num_start:end]
-                    return int(float(angle_str))
-            
-        except Exception as e:
-            pass
-        
-        return None
-    
-    def safe_decode(self, data):
-        """Safely decode bytes to string - MicroPython compatible with fixed error handling"""
-        try:
-            if isinstance(data, bytes):
-                return data.decode('utf-8')
-            elif isinstance(data, bytearray):
-                return bytes(data).decode('utf-8')
-            else:
-                return str(data)
-        except (Exception, NameError) as e:
-            print("Decode error: {}".format(e))
-            # Extract printable characters directly
-            result = ""
-            for byte in data:
-                if 32 <= byte <= 126:  # Printable ASCII
-                    result += chr(byte)
-            return result
-    
-    def has_complete_messages(self):
-        """Check if buffer contains what looks like complete CEEO messages"""
-        try:
-            text = self.safe_decode(self.raw_accumulator)
-            
-            # Look for complete CEEO message patterns
-            # A complete message should have: {"client_id":"...","type":"...","payload":"..."}
-            
-            # Count opening and closing braces to see if we have complete JSON
-            open_braces = text.count('{')
-            close_braces = text.count('}')
-            
-            # For CEEO messages, we typically need at least 2 levels of nesting
-            # Outer: {"client_id":...}
-            # Inner: {"topic":...} in payload
-            
-            if open_braces >= 2 and close_braces >= 2 and open_braces == close_braces:
-                # Look for specific CEEO patterns
-                if ('{"client_id"' in text and '"type":"data"' in text and 
-                    '"payload"' in text and text.count('}}') >= 1):
-                    return True
-                elif '{"client_id"' in text and '"type":"welcome"' in text:
-                    return True
-            
-            return False
-            
-        except:
-            return False
-    
-    def extract_complete_json_messages(self):
-        """Back to reliable extraction - no fragment processing"""
+    def extract_complete_json_messages_fast(self):
+        """Fast message extraction optimized for CEEO channel messages"""
         messages = []
         
         try:
-            # Decode buffer
-            text = self.safe_decode(self.raw_accumulator)
-            if not text or len(text) < 100:
+            if self.accumulator_len < 80:  # Minimum CEEO message size
                 return messages
             
-            # Remove leading 'T' if present
-            if text.startswith('T{"client_id"'):
-                text = text[1:]
+            # Convert used portion of buffer
+            text = self.safe_decode_fast(self.raw_accumulator[:self.accumulator_len])
+            if not text:
+                return messages
             
-            # Look for complete JSON messages using reliable brace counting
+            # Handle CEEO channel message format
             pos = 0
             while pos < len(text):
-                # Find start of JSON message
+                # Look for CEEO channel messages
                 json_start = text.find('{"client_id"', pos)
                 if json_start == -1:
                     break
                 
-                # Find the end by balancing braces carefully
+                # Find end by brace counting
                 brace_count = 0
                 json_end = -1
                 
@@ -349,42 +248,93 @@ class WebSocketManager:
                             break
                 
                 if json_end != -1:
-                    # Extract complete message
                     message_text = text[json_start:json_end]
                     
-                    # Only process substantial messages
-                    if len(message_text) > 100:
+                    # Process CEEO channel messages
+                    if len(message_text) > 80:  # Valid CEEO message size
                         try:
-                            # Validate JSON
-                            parsed = json.loads(message_text)
-                            messages.append(message_text)
+                            # Quick validation for CEEO format
+                            if ('"type":"data"' in message_text and '"payload"' in message_text) or '"type":"welcome"' in message_text:
+                                messages.append(message_text)
+                                
+                                # CRITICAL: Track channel subscription on welcome
+                                if '"type":"welcome"' in message_text:
+                                    self.channel_subscribed = True
+                                    print("Channel subscription confirmed")
                         except:
-                            # Skip invalid JSON silently
                             pass
                     
                     pos = json_end
                 else:
-                    # No complete message found
                     break
             
         except:
-            # Silent error handling
             pass
         
         return messages
     
+    def _compact_buffer_after_processing(self):
+        """Efficient buffer compaction"""
+        try:
+            text = self.safe_decode_fast(self.raw_accumulator[:self.accumulator_len])
+            if text:
+                last_end = text.rfind('}}')
+                if last_end != -1:
+                    byte_pos = min(last_end + 2, self.accumulator_len)
+                    remainder_len = self.accumulator_len - byte_pos
+                    if remainder_len > 0:
+                        self.raw_accumulator[:remainder_len] = self.raw_accumulator[byte_pos:self.accumulator_len]
+                        self.accumulator_len = remainder_len
+                    else:
+                        self.accumulator_len = 0
+                else:
+                    self.accumulator_len = 0
+            else:
+                self.accumulator_len = 0
+        except:
+            self.accumulator_len = 0
+    
+    def safe_decode_fast(self, data):
+        """Fast decode with minimal overhead"""
+        try:
+            return bytes(data).decode('utf-8')
+        except:
+            # Minimal fallback
+            result = ""
+            for byte in data:
+                if 32 <= byte <= 126:
+                    result += chr(byte)
+            return result
+    
     def is_connected(self):
-        """Check if connection is still active"""
+        """Enhanced connection checking with channel subscription awareness"""
         if not self.connected:
             return False
         
-        # Check for timeout
-        if time.ticks_diff(time.ticks_ms(), self.last_activity) > config.MESSAGE_TIMEOUT_MS:
+        current_time = time.ticks_ms()
+        
+        # CRITICAL: Check for silent disconnection via data activity
+        time_since_last_received = time.ticks_diff(current_time, self.last_data_received)
+        
+        # If we haven't received data in a while, connection might be stale
+        if time_since_last_received > config.MESSAGE_TIMEOUT_MS:
+            print("No data received recently, connection may be stale")
+            self.connected = False
+            return False
+        
+        # Standard timeout check
+        if time.ticks_diff(current_time, self.last_activity) > config.MESSAGE_TIMEOUT_MS:
             print("Connection timeout detected")
             self.connected = False
             return False
         
         return True
+    
+    def needs_state_sync(self):
+        """Check if we need to send state sync after reconnection"""
+        return self.connected and self.channel_subscribed and (
+            time.ticks_diff(time.ticks_ms(), self.last_data_sent) > 2000  # 2 seconds since last send
+        )
     
     def _cleanup_socket(self):
         """Clean up socket resources"""
@@ -396,8 +346,8 @@ class WebSocketManager:
             self.socket = None
         
         self.connected = False
-        self.receive_buffer = bytearray()
-        self.raw_accumulator = bytearray()
+        self.channel_subscribed = False  # Reset channel state
+        self.accumulator_len = 0
         gc.collect()
     
     def close(self):
