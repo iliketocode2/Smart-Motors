@@ -1,9 +1,10 @@
 # Configuration file for ESP32 SmartMotor system
+# Contains ALL variables that are actually used in the code
 
 # WiFi Configuration
 WIFI_SSID = "tufts_eecs"
 WIFI_PASSWORD = ""
-WIFI_TIMEOUT = 30
+WIFI_TIMEOUT = 20
 
 # WebSocket Configuration
 WS_HOST = "chrisrogers.pyscriptapps.com"
@@ -17,22 +18,27 @@ DISPLAY_SCL_PIN = 7
 DISPLAY_SDA_PIN = 6
 DISPLAY_RST_PIN = 10
 
-# Communication Configuration
-SEND_INTERVAL_MS = 500  # Reduced frequency for stability
-HEARTBEAT_INTERVAL_MS = 10000  # Less frequent heartbeats
-MESSAGE_TIMEOUT_MS = 45000  # Longer timeout before declaring connection dead
+# Communication Timing (your customized values)
+SEND_INTERVAL_MS = 200
+HEARTBEAT_INTERVAL_MS = 5000
+MESSAGE_TIMEOUT_MS = 15000
 MAX_RECONNECT_ATTEMPTS = 3
-RECONNECTION_DELAY_S = 5
+RECONNECTION_DELAY_S = 2
 
-# Buffer Configuration
-MAX_BUFFER_SIZE = 256  # Smaller buffer to prevent memory issues
-RECEIVE_CHUNK_SIZE = 128
-POTENTIOMETER_DEAD_ZONE = 5  # Larger dead zone to reduce noise
+# Rate Limiting (your customized values)
+MAX_MESSAGES_PER_WINDOW = 20
+MESSAGE_WINDOW_MS = 5000
 
 # Message Configuration
-MAX_MESSAGE_SIZE = 400
-ANGLE_CHANGE_THRESHOLD = 3  # Minimum angle change to trigger send
+MAX_MESSAGE_SIZE = 100
+RECEIVE_CHUNK_SIZE = 100
+ANGLE_CHANGE_THRESHOLD = 2
+
+# State Synchronization (your customized values)
+STATE_SYNC_DELAY_MS = 1000
+PARTNER_TIMEOUT_MS = 5000
 
 # Device Types
 DEVICE_CONTROLLER = "controller"
 DEVICE_RECEIVER = "receiver"
+
