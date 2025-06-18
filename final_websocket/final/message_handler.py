@@ -1,6 +1,6 @@
 """
-Message handling and processing for SmartMotor communication
-Handles CEEO channel protocol and device-specific message processing
+Message handling UPDATED to use config values
+Partner timeout and other timing values now come from config.py
 """
 
 import json
@@ -9,32 +9,44 @@ import config
 
 class MessageHandler:
     def __init__(self, device_type, hardware_manager):
-        """Initialize message handler with device type and hardware manager"""
+        """Initialize message handler using config values"""
         self.device_type = device_type
         self.hardware_manager = hardware_manager
         self.sequence_number = 0
         self.partner_sequence = 0
+        
+        # State tracking for persistence
         self.last_angle_sent = 90
         self.current_servo_angle = 90
+        self.last_confirmed_angle = 90
+        self.partner_last_seen = time.ticks_ms()
+        self.channel_welcomed = False
         
-        # Add missing attributes from original
+        # Connection health tracking
         self.last_message_received = 0
         self.partner_alive = False
+        self.reconnection_count = 0
         
-        # Set up topics based on device type - FIXED ROUTING
+        # Set up topics based on device type
         if device_type == config.DEVICE_CONTROLLER:
-            self.send_topic = "/controller/status"
-            self.listen_topic = "/receiver/status"  # Controller listens for receiver status
+            self.send_topic = "/controller/data"
+            self.listen_topic = "/receiver/data"
         else:  # DEVICE_RECEIVER
-            self.send_topic = "/receiver/status"  
-            self.listen_topic = "/controller/status"  # Receiver listens for controller status
+            self.send_topic = "/receiver/data"
+            self.listen_topic = "/controller/data"
         
         print("Device: {} | Send: {} | Listen: {}".format(
             device_type, self.send_topic, self.listen_topic))
     
     def create_data_message(self, angle):
-        """Create simple data message - just topic and angle"""
+        """Create data message with state tracking"""
         self.sequence_number += 1
+        
+        # Track the angle we're sending
+        if self.device_type == config.DEVICE_CONTROLLER:
+            self.last_angle_sent = angle
+        else:
+            self.current_servo_angle = angle
         
         return {
             "topic": self.send_topic,
@@ -42,7 +54,7 @@ class MessageHandler:
         }
     
     def create_heartbeat_message(self):
-        """Create simple heartbeat - just topic and sequence"""
+        """Create heartbeat message"""
         self.sequence_number += 1
         
         return {
@@ -51,70 +63,111 @@ class MessageHandler:
         }
     
     def process_received_message(self, message_data):
-        """Process simplified messages - both fragments and complete"""
+        """Process messages with CEEO channel awareness"""
         try:
             # Handle fragment messages (dict format)
             if isinstance(message_data, dict):
-                if message_data.get('type') == 'fragment':
-                    topic = message_data.get('topic', '')
-                    
-                    if topic == self.listen_topic:
-                        if self.device_type == config.DEVICE_RECEIVER and 'potentiometer_angle' in message_data:
-                            angle = message_data['potentiometer_angle']
-                            return self._process_servo_control(angle)
-                        elif self.device_type == config.DEVICE_CONTROLLER and 'servo_angle' in message_data:
-                            angle = message_data['servo_angle']
-                            self._update_controller_display(angle)
-                    
+                return self._handle_fragment_message(message_data)
+            
+            # Handle complete JSON messages (CEEO channel format)
+            try:
+                channel_msg = json.loads(message_data)
+            except (ValueError, TypeError):
                 return None
             
-            # Handle complete JSON messages - now much simpler
-            channel_msg = json.loads(message_data)
-            
+            # Handle CEEO channel welcome message
             if channel_msg.get('type') == 'welcome':
-                print("Channel connected")
-                return None
+                print("CEEO Channel welcomed - connection established")
+                self.channel_welcomed = True
+                self.reconnection_count += 1
+                
+                self.hardware_manager.update_display(
+                    "SmartMotor",
+                    "Channel Ready",
+                    "Conn #{}".format(self.reconnection_count),
+                    "Waiting..."
+                )
+                return {'action': 'channel_welcome'}
             
             # Handle CEEO channel data messages
             if channel_msg.get('type') == 'data' and 'payload' in channel_msg:
-                payload_str = channel_msg['payload']
-                payload = json.loads(payload_str)
+                return self._handle_ceeo_data_message(channel_msg)
                 
-                topic = payload.get('topic', '')
-                value = payload.get('value')
-                
-                print("Msg: {} = {}".format(topic, value))
-                
-                # Check if message is for this device
-                if topic == self.listen_topic:
-                    if isinstance(value, (int, float)):
-                        # It's an angle value
-                        if self.device_type == config.DEVICE_RECEIVER:
-                            return self._process_servo_control(int(value))
-                        else:
-                            self._update_controller_display(int(value))
-                    elif value == "heartbeat":
-                        print("Partner heartbeat")
-                    
         except Exception as e:
-            print("Message error: {}".format(e))
+            print("Message processing error: {}".format(e))
+        
+        return None
+    
+    def _handle_fragment_message(self, message_data):
+        """Handle fragment messages"""
+        if message_data.get('type') == 'fragment':
+            topic = message_data.get('topic', '')
+            
+            if topic == self.listen_topic:
+                if self.device_type == config.DEVICE_RECEIVER and 'potentiometer_angle' in message_data:
+                    angle = message_data['potentiometer_angle']
+                    return self._process_servo_control(angle)
+                elif self.device_type == config.DEVICE_CONTROLLER and 'servo_angle' in message_data:
+                    angle = message_data['servo_angle']
+                    self._update_controller_display(angle)
+        
+        return None
+    
+    def _handle_ceeo_data_message(self, channel_msg):
+        """Handle CEEO channel data messages"""
+        try:
+            payload_str = channel_msg['payload']
+            payload = json.loads(payload_str)
+        except (ValueError, TypeError):
+            return None
+        
+        topic = payload.get('topic', '')
+        value = payload.get('value')
+        
+        print("Msg: {} = {}".format(topic, value))
+        
+        # Update partner activity tracking
+        self.last_message_received = time.ticks_ms()
+        self.partner_alive = True
+        self.partner_last_seen = time.ticks_ms()
+        
+        # Check if message is for this device
+        if topic == self.listen_topic:
+            if isinstance(value, (int, float)):
+                angle_val = int(value)
+                
+                if self.device_type == config.DEVICE_RECEIVER:
+                    return self._process_servo_control(angle_val)
+                else:
+                    self._update_controller_display(angle_val)
+                    
+            elif value == "heartbeat":
+                print("Partner heartbeat")
+                self._update_partner_heartbeat_display()
         
         return None
     
     def _process_servo_control(self, angle):
-        """Move servo to angle and send confirmation"""
-        if isinstance(angle, (int, float)):
-            angle = max(0, min(180, int(angle)))
-            
+        """Process servo control with state tracking"""
+        if not isinstance(angle, (int, float)):
+            return None
+        
+        angle = max(0, min(180, int(angle)))
+        
+        # Check if this is a significant change
+        angle_change = abs(angle - self.current_servo_angle)
+        
+        if angle_change >= 1:  # Move on any change >= 1 degree
             if self.hardware_manager.move_servo(angle):
                 self.current_servo_angle = angle
+                self.last_confirmed_angle = angle
                 
                 # Update display
                 self.hardware_manager.update_display(
                     "RECEIVER",
                     "Servo: {}°".format(angle),
-                    "Seq: #{}".format(self.sequence_number),
-                    "Connected"
+                    "Partner: Active" if self.partner_alive else "Partner: Lost",
+                    "Seq: #{}".format(self.sequence_number)
                 )
                 
                 # Send confirmation
@@ -126,85 +179,69 @@ class MessageHandler:
         return None
     
     def _update_controller_display(self, angle):
-        """Update controller display with confirmed servo angle"""
+        """Update controller display"""
+        self.last_confirmed_angle = angle
+        
+        status = "Connected" if self.partner_alive else "Lost"
+        
         self.hardware_manager.update_display(
             "CONTROLLER",
             "Remote: {}°".format(angle),
-            "Seq: #{}".format(self.sequence_number), 
-            "Connected"
+            "Status: {}".format(status),
+            "Seq: #{}".format(self.sequence_number)
         )
     
-    def _process_device_message(self, data):
-        """Process device-specific message data"""
-        if not isinstance(data, dict):
-            return None
-        
-        # Update partner sequence
-        if 'sequence' in data:
-            self.partner_sequence = data['sequence']
-        
-        message_type = data.get('type', 'data')
-        
-        if message_type == 'heartbeat':
-            print("Received heartbeat from partner (seq #{})".format(self.partner_sequence))
-            return None
-        
-        # Handle data messages based on device type
-        if self.device_type == config.DEVICE_RECEIVER:
-            return self._handle_receiver_message(data)
-        else:
-            return self._handle_controller_message(data)
-    
-    def _handle_receiver_message(self, data):
-        """Handle messages for receiver device - optimized for speed"""
-        if 'potentiometer_angle' in data:
-            angle = data['potentiometer_angle']
-            
-            if isinstance(angle, (int, float)):
-                angle = max(0, min(180, int(angle)))
-                
-                # Move servo and update display - remove verbose logging
-                if self.hardware_manager.move_servo(angle):
-                    self.current_servo_angle = angle
-                    
-                    self.hardware_manager.update_display(
-                        "RECEIVER",
-                        "Servo: {}°".format(angle),
-                        "Partner: #{}".format(self.partner_sequence),
-                        "Me: #{}".format(self.sequence_number)
-                    )
-                    
-                    # Return action to send servo status
-                    return {
-                        'action': 'send_servo_status',
-                        'angle': angle
-                    }
-        
-        return None
-    
-    def _handle_controller_message(self, data):
-        """Handle messages for controller device (display servo status)"""
-        if 'servo_angle' in data:
-            angle = data['servo_angle']
+    def _update_partner_heartbeat_display(self):
+        """Update display when partner heartbeat is received"""
+        if self.device_type == config.DEVICE_CONTROLLER:
             self.hardware_manager.update_display(
                 "CONTROLLER",
-                "Remote: {}°".format(angle),
-                "Partner: #{}".format(self.partner_sequence),
-                "Me: #{}".format(self.sequence_number)
+                "Remote: {}°".format(self.last_confirmed_angle),
+                "Partner: Alive",
+                "Last HB: Now"
             )
-        
-        return None
+        else:
+            self.hardware_manager.update_display(
+                "RECEIVER",
+                "Servo: {}°".format(self.current_servo_angle),
+                "Partner: Alive", 
+                "Last HB: Now"
+            )
     
     def should_send_potentiometer_data(self):
-        """Check if controller should send potentiometer data"""
+        """Check if controller should send potentiometer data using config values"""
         if self.device_type != config.DEVICE_CONTROLLER:
             return False, 0
         
         current_angle = self.hardware_manager.read_potentiometer()
         
-        # Check if angle changed significantly
-        if abs(current_angle - self.last_angle_sent) >= config.ANGLE_CHANGE_THRESHOLD:
+        # Check if angle changed significantly OR if partner might be stale
+        angle_change = abs(current_angle - self.last_angle_sent)
+        time_since_partner = time.ticks_diff(time.ticks_ms(), self.partner_last_seen)
+        
+        # Send if significant change OR if we haven't heard from partner recently (uses config value)
+        if angle_change >= config.ANGLE_CHANGE_THRESHOLD or time_since_partner > config.PARTNER_TIMEOUT_MS:
             self.last_angle_sent = current_angle
             return True, current_angle
         
         return False, current_angle
+    
+    def is_partner_alive(self):
+        """Check if partner is still alive using config timeout"""
+        time_since_last = time.ticks_diff(time.ticks_ms(), self.partner_last_seen)
+        self.partner_alive = time_since_last < config.PARTNER_TIMEOUT_MS  # Use config value
+        return self.partner_alive
+    
+    def on_reconnection(self):
+        """Handle reconnection event"""
+        print("Message handler: Handling reconnection")
+        self.channel_welcomed = False
+        self.partner_alive = False
+        self.reconnection_count += 1
+        
+        self.hardware_manager.update_display(
+            "SmartMotor",
+            "Reconnecting...",
+            "Attempt #{}".format(self.reconnection_count),
+            "Please wait"
+        )
