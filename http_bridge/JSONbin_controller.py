@@ -1,6 +1,6 @@
 """
-ESP32 SmartMotor Controller - JSONBin.io Final Version
-Sends potentiometer data to JSONBin.io cloud storage
+ESP32 SmartMotor Controller - OPTIMIZED JSONBin.io Version
+High-speed potentiometer data transmission with minimal latency
 """
 
 import network
@@ -20,26 +20,28 @@ JSONBIN_API_KEY = "YOUR_API_KEY_HERE"      # Replace with your Master Key
 
 # JSONBin.io URLs
 JSONBIN_BASE_URL = "https://api.jsonbin.io/v3/b"
-JSONBIN_READ_URL = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}/latest"
 JSONBIN_WRITE_URL = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}"
 
 # Hardware configuration
 POTENTIOMETER_PIN = 3
 DISPLAY_AVAILABLE = True
 
-# Communication settings
-SEND_INTERVAL_MS = 1000  # Send every 1 second (cloud services are slower)
-ANGLE_CHANGE_THRESHOLD = 3  # Send when angle changes by 3+ degrees
+# OPTIMIZED Communication settings
+SEND_INTERVAL_MS = 300          # Reduced from 1000ms - much faster response
+ANGLE_CHANGE_THRESHOLD = 1      # Reduced from 3 - more sensitive
+HTTP_TIMEOUT = 3                # Reduced from 10 - faster failure detection
+GC_FREQUENCY = 5                # More frequent garbage collection
 
-class SmartMotorController:
+class OptimizedSmartMotorController:
     def __init__(self):
         self.last_angle_sent = 90
         self.last_send_time = 0
         self.send_count = 0
         self.error_count = 0
-        self.last_receiver_angle = 90
+        self.consecutive_errors = 0
+        self.last_successful_send = time.ticks_ms()
         
-        # Initialize hardware
+        # Initialize hardware with fewer samples for speed
         self.potentiometer = ADC(Pin(POTENTIOMETER_PIN))
         self.potentiometer.atten(ADC.ATTN_11DB)
         
@@ -58,10 +60,10 @@ class SmartMotorController:
         else:
             self.display_available = False
         
-        print("SmartMotor Controller initialized (JSONBin.io)")
+        print("OPTIMIZED SmartMotor Controller initialized")
         
     def connect_wifi(self):
-        """Connect to WiFi network"""
+        """Connect to WiFi network with faster timeout"""
         wlan = network.WLAN(network.STA_IF)
         wlan.active(True)
         
@@ -70,12 +72,12 @@ class SmartMotorController:
             return True
         
         print(f"Connecting to WiFi: {WIFI_SSID}")
-        self.update_display("Connecting", "to WiFi...", "", "")
+        self.update_display_fast("Connecting", "WiFi...", "", "")
         
         wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         
-        # Wait for connection
-        timeout = 30
+        # Reduced timeout for faster startup
+        timeout = 20
         while not wlan.isconnected() and timeout > 0:
             print(".", end="")
             time.sleep(1)
@@ -84,167 +86,169 @@ class SmartMotorController:
         if wlan.isconnected():
             ip = wlan.ifconfig()[0]
             print(f"\nWiFi connected! IP: {ip}")
-            self.update_display("WiFi Connected", "JSONBin Ready", "", "")
-            time.sleep(2)
+            self.update_display_fast("WiFi OK", "Ready!", "", "")
+            time.sleep(1)
             return True
         else:
             print("\nWiFi connection failed!")
-            self.update_display("WiFi Failed", "Check config", "", "")
+            self.update_display_fast("WiFi Failed", "Check config", "", "")
             return False
     
-    def read_potentiometer(self):
-        """Read potentiometer value and convert to angle"""
+    def read_potentiometer_fast(self):
+        """Optimized potentiometer reading with minimal samples"""
         try:
-            raw_value = self.potentiometer.read()
-            angle = int((180.0 / 4095.0) * raw_value)
+            # Take only 2 readings instead of 3 for speed
+            reading1 = self.potentiometer.read()
+            time.sleep_ms(1)  # Minimal delay
+            reading2 = self.potentiometer.read()
+            
+            # Quick average
+            avg_reading = (reading1 + reading2) // 2
+            
+            # Convert to angle
+            angle = int((180.0 / 4095.0) * avg_reading)
             angle = max(0, min(180, angle))
             return angle
         except Exception as e:
-            print(f"Potentiometer read error: {e}")
+            print(f"Potentiometer error: {e}")
             return self.last_angle_sent
     
-    def get_current_data_from_jsonbin(self):
-        """Get current data from JSONBin to preserve receiver data"""
+    def send_data_optimized(self, angle):
+        """OPTIMIZED: Single PUT request with minimal data"""
         try:
-            headers = {
-                "X-Master-Key": JSONBIN_API_KEY
-            }
-            
-            response = urequests.get(JSONBIN_READ_URL, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                record = data.get("record", {})
-                self.last_receiver_angle = record.get("receiver_angle", 90)
-                response.close()
-                return record
-            else:
-                print(f"JSONBin read error: {response.status_code}")
-                response.close()
-                return None
-                
-        except Exception as e:
-            print(f"JSONBin read error: {e}")
-            return None
-    
-    def send_data_to_jsonbin(self, angle):
-        """Send angle data to JSONBin.io"""
-        try:
-            # First get current data to preserve receiver info
-            current_data = self.get_current_data_from_jsonbin()
-            
-            # Create updated data
+            # SIMPLIFIED data structure - only essential data
             data = {
-                "controller_angle": angle,
-                "receiver_angle": self.last_receiver_angle,
-                "controller_count": self.send_count + 1,
-                "receiver_count": current_data.get("receiver_count", 0) if current_data else 0,
-                "last_update": time.time()
+                "angle": angle,        # Just the angle - no extra fields
+                "count": self.send_count + 1,
+                "time": time.ticks_ms()
             }
             
             headers = {
                 "Content-Type": "application/json",
-                "X-Master-Key": JSONBIN_API_KEY
+                "X-Master-Key": JSONBIN_API_KEY,
+                "Connection": "close"  # Hint for connection reuse
             }
             
-            response = urequests.put(JSONBIN_WRITE_URL, json=data, headers=headers, timeout=10)
+            # Single PUT request - no GET first!
+            response = urequests.put(
+                JSONBIN_WRITE_URL, 
+                json=data, 
+                headers=headers, 
+                timeout=HTTP_TIMEOUT  # Much faster timeout
+            )
             
             if response.status_code == 200:
                 self.send_count += 1
-                print(f"✅ Sent to JSONBin: {angle}° (#{self.send_count})")
+                self.consecutive_errors = 0
+                self.last_successful_send = time.ticks_ms()
+                print(f"✅ Sent: {angle}° (#{self.send_count})")
                 response.close()
                 return True
             else:
-                print(f"❌ JSONBin error: {response.status_code}")
+                print(f"❌ HTTP error: {response.status_code}")
                 response.close()
+                self.consecutive_errors += 1
                 return False
                 
         except Exception as e:
             self.error_count += 1
+            self.consecutive_errors += 1
             print(f"❌ Send error: {e}")
             return False
     
-    def update_display(self, line1="", line2="", line3="", line4=""):
-        """Update OLED display if available"""
+    def update_display_fast(self, line1="", line2="", line3="", line4=""):
+        """Optimized display update - only when needed"""
         if not self.display_available:
             return
         
         try:
             self.display.fill(0)
-            if line1:
-                self.display.text(line1[:16], 0, 10)
-            if line2:
-                self.display.text(line2[:16], 0, 25)
-            if line3:
-                self.display.text(line3[:16], 0, 40)
-            if line4:
-                self.display.text(line4[:16], 0, 55)
+            if line1: self.display.text(line1[:16], 0, 10)
+            if line2: self.display.text(line2[:16], 0, 25)
+            if line3: self.display.text(line3[:16], 0, 40)
+            if line4: self.display.text(line4[:16], 0, 55)
             self.display.show()
-        except Exception as e:
-            print(f"Display error: {e}")
+        except:
+            pass  # Fail silently to maintain speed
+    
+    def is_connection_healthy(self):
+        """Check if connection is still responsive"""
+        time_since_success = time.ticks_diff(time.ticks_ms(), self.last_successful_send)
+        return self.consecutive_errors < 5 and time_since_success < 10000  # 10 second health check
     
     def run(self):
-        """Main control loop"""
-        print("Starting SmartMotor Controller (JSONBin.io)...")
+        """OPTIMIZED main control loop"""
+        print("Starting OPTIMIZED SmartMotor Controller...")
         
         # Connect to WiFi
         if not self.connect_wifi():
             print("Failed to connect to WiFi. Exiting.")
             return
         
-        print("🌐 Connected to JSONBin.io cloud service")
-        print(f"📊 Bin ID: {JSONBIN_BIN_ID}")
-        print("Starting data transmission...")
+        print(f"🚀 OPTIMIZED Controller Running:")
+        print(f"   📡 Send Interval: {SEND_INTERVAL_MS}ms")
+        print(f"   🎯 Sensitivity: {ANGLE_CHANGE_THRESHOLD}°")
+        print(f"   ⏱️  Timeout: {HTTP_TIMEOUT}s")
+        print(f"   📊 Bin ID: {JSONBIN_BIN_ID}")
         
-        # Main loop
+        # Main loop - OPTIMIZED
         while True:
             try:
                 current_time = time.ticks_ms()
                 
-                # Check if it's time to send data
+                # Check if it's time to send (much more frequent)
                 if time.ticks_diff(current_time, self.last_send_time) >= SEND_INTERVAL_MS:
-                    # Read potentiometer
-                    angle = self.read_potentiometer()
                     
-                    # Check if angle changed significantly
+                    # Fast potentiometer read
+                    angle = self.read_potentiometer_fast()
+                    
+                    # More sensitive change detection
                     angle_change = abs(angle - self.last_angle_sent)
                     
-                    if angle_change >= ANGLE_CHANGE_THRESHOLD:
-                        # Send data to JSONBin
-                        if self.send_data_to_jsonbin(angle):
+                    if angle_change >= ANGLE_CHANGE_THRESHOLD or self.send_count == 0:
+                        # Send data with optimized method
+                        if self.send_data_optimized(angle):
                             self.last_angle_sent = angle
                             self.last_send_time = current_time
                             
-                            # Update display
-                            self.update_display(
+                            # Update display with success
+                            self.update_display_fast(
                                 "CONTROLLER",
                                 f"Sent: {angle}°",
-                                f"Recv: {self.last_receiver_angle}°",
-                                f"Count: #{self.send_count}"
+                                f"Rate: {SEND_INTERVAL_MS}ms",
+                                f"#{self.send_count} E:{self.error_count}"
                             )
                         else:
-                            # Update display with error
-                            self.update_display(
+                            # Display error but keep trying
+                            self.update_display_fast(
                                 "CONTROLLER",
                                 f"Angle: {angle}°",
-                                "Send Failed",
-                                f"Errors: {self.error_count}"
+                                "SEND FAILED",
+                                f"#{self.send_count} E:{self.error_count}"
                             )
                     else:
-                        # Update display without sending
-                        self.update_display(
-                            "CONTROLLER",
+                        # Update display showing current reading
+                        self.update_display_fast(
+                            "CONTROLLER", 
                             f"Angle: {angle}°",
                             f"Last: {self.last_angle_sent}°",
-                            f"Count: #{self.send_count}"
+                            f"#{self.send_count} E:{self.error_count}"
                         )
+                    
+                    # Reset timer regardless of send result
+                    self.last_send_time = current_time
                 
-                # Small delay
-                time.sleep_ms(100)
-                
-                # Periodic garbage collection
-                if self.send_count % 10 == 0:
+                # Optimized garbage collection
+                if self.send_count % GC_FREQUENCY == 0:
                     gc.collect()
+                
+                # Check connection health
+                if not self.is_connection_healthy():
+                    print("⚠️ Connection health poor, continuing...")
+                    self.consecutive_errors = 0  # Reset and keep trying
+                
+                # Minimal loop delay for maximum responsiveness
+                time.sleep_ms(50)
                 
             except KeyboardInterrupt:
                 print("Shutting down...")
@@ -252,9 +256,9 @@ class SmartMotorController:
             except Exception as e:
                 print(f"Main loop error: {e}")
                 self.error_count += 1
-                time.sleep(2)
+                time.sleep(1)  # Brief pause on major errors
 
-# Run the controller
+# Run the optimized controller
 if __name__ == "__main__":
-    controller = SmartMotorController()
+    controller = OptimizedSmartMotorController()
     controller.run()
