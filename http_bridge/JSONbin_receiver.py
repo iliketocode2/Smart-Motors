@@ -1,6 +1,6 @@
 """
-ESP32 SmartMotor Receiver - JSONBin.io Version  
-Uses free cloud JSON storage - no local server or IP configuration needed!
+ESP32 SmartMotor Receiver - OPTIMIZED JSONBin.io Version  
+High-speed servo control with minimal latency polling
 """
 
 import network
@@ -10,60 +10,70 @@ import time
 import gc
 from machine import Pin, PWM
 
-# Configuration - No IP addresses needed!
+# Configuration
 WIFI_SSID = "tufts_eecs"
 WIFI_PASSWORD = ""
 
-# JSONBin.io configuration (free service)
+# JSONBin.io configuration - SAME AS CONTROLLER
 JSONBIN_BASE_URL = "https://api.jsonbin.io/v3/b"
-JSONBIN_BIN_ID = ""  # Same as controller
-JSONBIN_API_KEY = ""  # Same as controller
-
-# Or use alternative service for testing
-TEST_MODE = False  # Set to False when using JSONBin
+JSONBIN_BIN_ID = "YOUR_BIN_ID_HERE"  # Same as controller
+JSONBIN_API_KEY = "YOUR_API_KEY_HERE"  # Same as controller
 
 # Hardware configuration
 SERVO_PIN = 2
 DISPLAY_AVAILABLE = True
 
-# Communication settings
-POLL_INTERVAL_MS = 750  # Poll every 750ms (cloud services are slower)
+# OPTIMIZED Communication settings
+POLL_INTERVAL_MS = 250          # Much faster - reduced from 750ms
+HTTP_TIMEOUT = 3                # Faster timeout - reduced from 10s
+SERVO_MOVE_THRESHOLD = 1        # Move on 1° change instead of 2°
+GC_FREQUENCY = 8                # More frequent garbage collection
 
-class Servo:
-    """Simple servo control class"""
+class OptimizedServo:
+    """Optimized servo control with faster response"""
     def __init__(self, pin, freq=50, min_us=600, max_us=2400, angle=180):
         self.min_us = min_us
         self.max_us = max_us
         self.freq = freq
         self.angle = angle
         self.pwm = PWM(pin, freq=freq, duty=0)
+        self.current_angle = 90
 
-    def write_angle(self, degrees):
-        """Move servo to specified angle"""
-        if degrees < 0:
-            degrees = 0
-        elif degrees > self.angle:
-            degrees = self.angle
+    def write_angle_fast(self, degrees):
+        """Optimized servo movement with bounds checking"""
+        try:
+            degrees = max(0, min(self.angle, int(degrees)))
             
-        # Convert angle to microseconds
-        us = self.min_us + (self.max_us - self.min_us) * degrees / self.angle
-        
-        # Convert microseconds to duty cycle
-        duty = int(us * 1024 * self.freq / 1000000)
-        self.pwm.duty(duty)
+            # Skip if no change
+            if degrees == self.current_angle:
+                return True
+            
+            # Convert angle to microseconds
+            us = self.min_us + (self.max_us - self.min_us) * degrees / self.angle
+            
+            # Convert to duty cycle
+            duty = int(us * 1024 * self.freq / 1000000)
+            self.pwm.duty(duty)
+            
+            self.current_angle = degrees
+            return True
+        except:
+            return False
 
-class SmartMotorReceiver:
+class OptimizedSmartMotorReceiver:
     def __init__(self):
         self.current_servo_angle = 90
         self.poll_count = 0
         self.error_count = 0
+        self.consecutive_errors = 0
         self.last_poll_time = 0
-        self.last_controller_data = None
+        self.last_successful_poll = time.ticks_ms()
+        self.last_angle_received = 90
         
-        # Initialize servo
-        self.servo = Servo(Pin(SERVO_PIN))
-        self.servo.write_angle(90)  # Center position
-        print("Servo initialized and centered")
+        # Initialize optimized servo
+        self.servo = OptimizedServo(Pin(SERVO_PIN))
+        self.servo.write_angle_fast(90)  # Center position
+        print("Optimized servo initialized")
         
         # Initialize display if available
         if DISPLAY_AVAILABLE:
@@ -80,10 +90,10 @@ class SmartMotorReceiver:
         else:
             self.display_available = False
         
-        print("SmartMotor Receiver initialized (Cloud Version)")
+        print("OPTIMIZED SmartMotor Receiver initialized")
         
     def connect_wifi(self):
-        """Connect to WiFi network"""
+        """Fast WiFi connection"""
         wlan = network.WLAN(network.STA_IF)
         wlan.active(True)
         
@@ -92,12 +102,12 @@ class SmartMotorReceiver:
             return True
         
         print(f"Connecting to WiFi: {WIFI_SSID}")
-        self.update_display("Connecting", "to WiFi...", "", "")
+        self.update_display_fast("Connecting", "WiFi...", "", "")
         
         wlan.connect(WIFI_SSID, WIFI_PASSWORD)
         
-        # Wait for connection
-        timeout = 30
+        # Faster connection timeout
+        timeout = 20
         while not wlan.isconnected() and timeout > 0:
             print(".", end="")
             time.sleep(1)
@@ -106,201 +116,173 @@ class SmartMotorReceiver:
         if wlan.isconnected():
             ip = wlan.ifconfig()[0]
             print(f"\nWiFi connected! IP: {ip}")
-            self.update_display("WiFi Connected", "Cloud Ready", "", "")
-            time.sleep(2)
+            self.update_display_fast("WiFi OK", "Ready!", "", "")
+            time.sleep(1)
             return True
         else:
             print("\nWiFi connection failed!")
-            self.update_display("WiFi Failed", "Check config", "", "")
+            self.update_display_fast("WiFi Failed", "Check config", "", "")
             return False
     
-    def poll_cloud_service(self):
-        """Poll cloud service for controller data"""
+    def poll_data_optimized(self):
+        """OPTIMIZED: Fast polling with simplified data structure"""
         try:
-            if TEST_MODE:
-                # In test mode, we'll simulate getting data
-                # (since httpbin.org doesn't store data)
-                # You can replace this with actual test data
-                print("📡 Polling cloud (test mode)...")
+            url = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}/latest"
+            headers = {
+                "X-Master-Key": JSONBIN_API_KEY,
+                "Connection": "close"  # Connection reuse hint
+            }
+            
+            # Fast HTTP request with short timeout
+            response = urequests.get(url, headers=headers, timeout=HTTP_TIMEOUT)
+            
+            if response.status_code == 200:
+                data = response.json()
+                record = data.get("record", {})
+                
+                # Get angle from simplified structure
+                angle = record.get("angle", 90)  # Match controller's simplified format
+                
                 self.poll_count += 1
+                self.consecutive_errors = 0
+                self.last_successful_poll = time.ticks_ms()
+                self.last_angle_received = angle
                 
-                # Simulate receiving some data
-                # In real implementation, this would be actual cloud data
-                simulated_angle = 90 + (self.poll_count % 20) * 5  # Simulate changing angles
-                return min(180, simulated_angle)
-                
+                print(f"📡 Polled: {angle}° (#{self.poll_count})")
+                response.close()
+                return angle
             else:
-                # Use JSONBin.io to get real data
-                url = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}/latest"
-                headers = {
-                    "X-Master-Key": JSONBIN_API_KEY
-                }
+                print(f"❌ Poll error: {response.status_code}")
+                response.close()
+                self.consecutive_errors += 1
+                return None
                 
-                response = urequests.get(url, headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    record = data.get("record", {})
-                    angle = record.get("controller_angle", 90)
-                    
-                    self.poll_count += 1
-                    print(f"📡 Polled cloud: {angle}° (#{self.poll_count})")
-                    response.close()
-                    return angle
-                else:
-                    print(f"❌ Cloud poll error: {response.status_code}")
-                    response.close()
-                    return None
-                    
         except Exception as e:
             self.error_count += 1
+            self.consecutive_errors += 1
             print(f"❌ Poll error: {e}")
             return None
     
-    def move_servo(self, angle):
-        """Move servo to specified angle"""
+    def move_servo_optimized(self, target_angle):
+        """OPTIMIZED: Fast servo movement with minimal threshold"""
         try:
-            angle = max(0, min(180, int(angle)))
-            self.servo.write_angle(angle)
-            self.current_servo_angle = angle
-            print(f"🎯 Moved servo to: {angle}°")
-            return True
+            target_angle = max(0, min(180, int(target_angle)))
+            
+            # More sensitive movement threshold
+            angle_change = abs(target_angle - self.current_servo_angle)
+            
+            if angle_change >= SERVO_MOVE_THRESHOLD:
+                if self.servo.write_angle_fast(target_angle):
+                    self.current_servo_angle = target_angle
+                    print(f"🎯 Moved: {self.current_servo_angle}°")
+                    return True
+            else:
+                # Angle too close, no movement needed
+                return True
+                
         except Exception as e:
             print(f"❌ Servo error: {e}")
             return False
     
-    def send_confirmation_to_cloud(self, angle):
-        """Send servo position confirmation back to cloud"""
-        try:
-            if TEST_MODE:
-                # In test mode, just print confirmation
-                print(f"✅ Confirmed: {angle}° (test mode)")
-                return True
-                
-            else:
-                # Update JSONBin with receiver confirmation
-                url = f"{JSONBIN_BASE_URL}/{JSONBIN_BIN_ID}"
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Master-Key": JSONBIN_API_KEY
-                }
-                
-                # Get current data first, then update receiver angle
-                data = {
-                    "controller_angle": self.last_controller_data or 90,
-                    "receiver_angle": angle,
-                    "last_update": time.time(),
-                    "receiver_count": self.poll_count
-                }
-                
-                response = urequests.put(url, json=data, headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    print(f"✅ Confirmed to cloud: {angle}°")
-                    response.close()
-                    return True
-                else:
-                    response.close()
-                    return False
-                    
-        except Exception as e:
-            print(f"❌ Confirmation error: {e}")
-            return False
-    
-    def update_display(self, line1="", line2="", line3="", line4=""):
-        """Update OLED display if available"""
+    def update_display_fast(self, line1="", line2="", line3="", line4=""):
+        """Fast display update with error suppression"""
         if not self.display_available:
             return
         
         try:
             self.display.fill(0)
-            if line1:
-                self.display.text(line1[:16], 0, 10)
-            if line2:
-                self.display.text(line2[:16], 0, 25)
-            if line3:
-                self.display.text(line3[:16], 0, 40)
-            if line4:
-                self.display.text(line4[:16], 0, 55)
+            if line1: self.display.text(line1[:16], 0, 10)
+            if line2: self.display.text(line2[:16], 0, 25)
+            if line3: self.display.text(line3[:16], 0, 40)
+            if line4: self.display.text(line4[:16], 0, 55)
             self.display.show()
-        except Exception as e:
-            print(f"Display error: {e}")
+        except:
+            pass  # Fail silently for speed
+    
+    def is_connection_healthy(self):
+        """Check polling health"""
+        time_since_success = time.ticks_diff(time.ticks_ms(), self.last_successful_poll)
+        return self.consecutive_errors < 5 and time_since_success < 8000  # 8 second health check
     
     def run(self):
-        """Main control loop"""
-        print("Starting SmartMotor Receiver (Cloud Version)...")
+        """OPTIMIZED main control loop"""
+        print("Starting OPTIMIZED SmartMotor Receiver...")
         
         # Connect to WiFi
         if not self.connect_wifi():
             print("Failed to connect to WiFi. Exiting.")
             return
         
-        print("🌐 Using cloud service - no local server needed!")
-        print("Starting data polling...")
+        print(f"🚀 OPTIMIZED Receiver Running:")
+        print(f"   📡 Poll Interval: {POLL_INTERVAL_MS}ms")
+        print(f"   🎯 Move Threshold: {SERVO_MOVE_THRESHOLD}°")
+        print(f"   ⏱️  Timeout: {HTTP_TIMEOUT}s")
+        print(f"   📊 Bin ID: {JSONBIN_BIN_ID}")
         
-        # Main loop
+        # Main loop - OPTIMIZED for speed
         while True:
             try:
                 current_time = time.ticks_ms()
                 
-                # Check if it's time to poll
+                # Check if it's time to poll (much more frequent)
                 if time.ticks_diff(current_time, self.last_poll_time) >= POLL_INTERVAL_MS:
-                    # Poll cloud service for new data
-                    new_angle = self.poll_cloud_service()
+                    
+                    # Fast poll for new data
+                    new_angle = self.poll_data_optimized()
                     
                     if new_angle is not None:
-                        self.last_controller_data = new_angle
-                        
-                        # Check if angle changed
-                        angle_change = abs(new_angle - self.current_servo_angle)
-                        
-                        if angle_change >= 2:  # Move on changes >= 2 degrees
-                            if self.move_servo(new_angle):
-                                # Send confirmation back to cloud
-                                self.send_confirmation_to_cloud(new_angle)
-                                
-                                # Update display
-                                self.update_display(
-                                    "RECEIVER",
-                                    f"Servo: {new_angle}°",
-                                    f"Cloud: #{self.poll_count}",
-                                    f"Errors: {self.error_count}"
-                                )
-                        else:
-                            # Update display without moving
-                            self.update_display(
+                        # Try to move servo with optimized method
+                        if self.move_servo_optimized(new_angle):
+                            # Update display with success
+                            self.update_display_fast(
                                 "RECEIVER",
                                 f"Servo: {self.current_servo_angle}°",
+                                f"Rate: {POLL_INTERVAL_MS}ms",
+                                f"#{self.poll_count} E:{self.error_count}"
+                            )
+                        else:
+                            # Servo movement failed
+                            self.update_display_fast(
+                                "RECEIVER",
                                 f"Target: {new_angle}°",
-                                f"Cloud: #{self.poll_count}"
+                                "SERVO FAILED",
+                                f"#{self.poll_count} E:{self.error_count}"
                             )
                     else:
-                        # Update display with error
-                        self.update_display(
+                        # Poll failed, show error
+                        self.update_display_fast(
                             "RECEIVER",
                             f"Servo: {self.current_servo_angle}°",
-                            "Poll Failed",
-                            f"Errors: {self.error_count}"
+                            "POLL FAILED",
+                            f"#{self.poll_count} E:{self.error_count}"
                         )
                     
+                    # Reset poll timer regardless of result
                     self.last_poll_time = current_time
                 
-                # Small delay
-                time.sleep_ms(150)
-                
-                # Periodic garbage collection
-                if self.poll_count % 20 == 0:
+                # Optimized garbage collection
+                if self.poll_count % GC_FREQUENCY == 0:
                     gc.collect()
+                
+                # Check connection health
+                if not self.is_connection_healthy():
+                    print("⚠️ Connection health poor, continuing...")
+                    self.consecutive_errors = 0  # Reset and keep trying
+                
+                # Minimal delay for maximum responsiveness
+                time.sleep_ms(30)
                 
             except KeyboardInterrupt:
                 print("Shutting down...")
+                # Return servo to center on shutdown
+                self.servo.write_angle_fast(90)
                 break
             except Exception as e:
                 print(f"Main loop error: {e}")
                 self.error_count += 1
-                time.sleep(2)
+                time.sleep(1)
 
-# Run the receiver
+# Run the optimized receiver
 if __name__ == "__main__":
-    receiver = SmartMotorReceiver()
+    receiver = OptimizedSmartMotorReceiver()
     receiver.run()
