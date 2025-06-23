@@ -253,7 +253,7 @@ class TCPSmartMotorReceiver:
                     self.message_count += 1
                     self.current_servo_angle = angle
                     
-                    print("Moved servo to {}° (#{})" .format(angle, self.message_count))
+                    print("Moved servo to {}deg (#{})" .format(angle, self.message_count))
                     
                     # Send response back to client (optional)
                     self.send_response(angle)
@@ -379,14 +379,14 @@ class TCPSmartMotorReceiver:
                         client_ip = self.client_address[0] if self.client_address else "Unknown"
                         self.update_display(
                             "TCP RECEIVER",
-                            "Servo: {}°".format(self.current_servo_angle),
+                            "Servo: {}deg".format(self.current_servo_angle),
                             "Client: {}".format(client_ip[-8:]),
                             "Msgs: #{}".format(self.message_count)
                         )
                     else:
                         self.update_display(
                             "TCP RECEIVER",
-                            "Servo: {}°".format(self.current_servo_angle),
+                            "Servo: {}deg".format(self.current_servo_angle),
                             "Waiting...",
                             "{}:{}".format(self.my_ip[-8:], SERVER_PORT)
                         )
