@@ -1,5 +1,14 @@
 # ESP32 Wireless and Pyscript-page-less solutions
 
+## Instructions
+Since the Direct TCP Communication is the fastest and most reliable of all of the solutions I have come up with, here are the instructions on how to setup this communication on your ESP32 Smart Motors:
+1. Navigate to the [direct_TCP folder](https://github.com/iliketocode2/Smart-Motors/tree/main/direct_TCP)
+2. Update the wifi information in receiver.py
+3. Run the receiver.py program on your receiver esp32
+4. Once it connects to the internet, look for and copy its IP address in your IDE console.
+5. Update wifi information in controller.py and update controller.py with the receiver's IP
+6. Run the controller.py program on your controller esp32
+
 ## Direct TCP Communication
 MicroPython's network library (WLAN class) combined with the socket module has full capacity to create two-way TCP protocol.
 - Pros:
