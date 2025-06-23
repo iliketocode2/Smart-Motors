@@ -170,7 +170,7 @@ class TCPSmartMotorController:
             
             if bytes_sent > 0:
                 self.message_count += 1
-                print("TCP sent: {}° (#{})" .format(angle, self.message_count))
+                print("TCP sent: {}deg (#{})" .format(angle, self.message_count))
                 return True
             else:
                 print("TCP send failed: no bytes sent")
@@ -306,7 +306,7 @@ class TCPSmartMotorController:
                             # Update display
                             self.update_display(
                                 "TCP CONTROLLER",
-                                "Angle: {}°".format(angle),
+                                "Angle: {}deg".format(angle),
                                 "Sent: #{}".format(self.message_count),
                                 "Connected"
                             )
@@ -318,14 +318,14 @@ class TCPSmartMotorController:
                 if self.connected and not should_send:
                     self.update_display(
                         "TCP CONTROLLER",
-                        "Angle: {}°".format(angle),
+                        "Angle: {}deg".format(angle),
                         "Ready: #{}".format(self.message_count),
                         "{}:{}".format(self.server_ip[-8:], self.server_port)
                     )
                 elif not self.connected:
                     self.update_display(
                         "TCP CONTROLLER",
-                        "Angle: {}°".format(angle),
+                        "Angle: {}deg".format(angle),
                         "Disconnected",
                         "Attempts: {}".format(self.connection_attempts)
                     )
