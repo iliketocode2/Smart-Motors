@@ -157,7 +157,7 @@ class MessageHandler:
         # Check if this is a significant change
         angle_change = abs(angle - self.current_servo_angle)
         
-        if angle_change >= 1:  # Move on any change >= 1 degree
+        if angle_change >= config.ANGLE_CHANGE_THRESHOLD:
             if self.hardware_manager.move_servo(angle):
                 self.current_servo_angle = angle
                 self.last_confirmed_angle = angle
@@ -165,7 +165,7 @@ class MessageHandler:
                 # Update display
                 self.hardware_manager.update_display(
                     "RECEIVER",
-                    "Servo: {}°".format(angle),
+                    "Servo: {}deg".format(angle),
                     "Partner: Active" if self.partner_alive else "Partner: Lost",
                     "Seq: #{}".format(self.sequence_number)
                 )
@@ -186,7 +186,7 @@ class MessageHandler:
         
         self.hardware_manager.update_display(
             "CONTROLLER",
-            "Remote: {}°".format(angle),
+            "Remote: {}deg".format(angle),
             "Status: {}".format(status),
             "Seq: #{}".format(self.sequence_number)
         )
@@ -196,14 +196,14 @@ class MessageHandler:
         if self.device_type == config.DEVICE_CONTROLLER:
             self.hardware_manager.update_display(
                 "CONTROLLER",
-                "Remote: {}°".format(self.last_confirmed_angle),
+                "Remote: {}deg".format(self.last_confirmed_angle),
                 "Partner: Alive",
                 "Last HB: Now"
             )
         else:
             self.hardware_manager.update_display(
                 "RECEIVER",
-                "Servo: {}°".format(self.current_servo_angle),
+                "Servo: {}deg".format(self.current_servo_angle),
                 "Partner: Alive", 
                 "Last HB: Now"
             )
@@ -219,7 +219,7 @@ class MessageHandler:
         angle_change = abs(current_angle - self.last_angle_sent)
         time_since_partner = time.ticks_diff(time.ticks_ms(), self.partner_last_seen)
         
-        # Send if significant change OR if we haven't heard from partner recently (uses config value)
+        # Send if significant change OR if we haven't heard from partner recently
         if angle_change >= config.ANGLE_CHANGE_THRESHOLD or time_since_partner > config.PARTNER_TIMEOUT_MS:
             self.last_angle_sent = current_angle
             return True, current_angle
@@ -229,7 +229,7 @@ class MessageHandler:
     def is_partner_alive(self):
         """Check if partner is still alive using config timeout"""
         time_since_last = time.ticks_diff(time.ticks_ms(), self.partner_last_seen)
-        self.partner_alive = time_since_last < config.PARTNER_TIMEOUT_MS  # Use config value
+        self.partner_alive = time_since_last < config.PARTNER_TIMEOUT_MS
         return self.partner_alive
     
     def on_reconnection(self):
