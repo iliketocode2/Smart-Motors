@@ -1,10 +1,6 @@
 """
-Hardware abstraction layer for ESP32 SmartMotor components - OPTIMIZED
-Key optimizations:
-- Faster potentiometer reading (reduced from 6ms to 1ms)
+Hardware abstraction layer for ESP32 SmartMotor components
 - Cached values to reduce hardware access
-- Streamlined servo control
-- More efficient display updates
 """
 
 from machine import Pin, SoftI2C, ADC
@@ -15,19 +11,18 @@ import config
 
 class HardwareManager:
     def __init__(self, device_type):
-        """Initialize hardware components optimized for performance"""
         self.device_type = device_type
         self.display = None
         self.servo = None
         self.potentiometer = None
         self.potentiometer_available = False
         
-        # OPTIMIZATION 1: Cache hardware values to reduce access frequency
+        # Cache hardware values to reduce access frequency
         self.cached_potentiometer_value = 90
         self.last_potentiometer_read = 0
         self.potentiometer_cache_timeout = 20  # Cache for 20ms
         
-        # OPTIMIZATION 2: Pre-allocate display strings to reduce memory allocation
+        # Pre-allocate display strings to reduce memory
         self.display_line1 = ""
         self.display_line2 = ""
         self.display_line3 = ""
@@ -38,7 +33,7 @@ class HardwareManager:
         self._setup_potentiometer()
         
     def _setup_display(self):
-        """Initialize OLED display - same logic"""
+        """Initialize OLED display"""
         try:
             i2c = SoftI2C(scl=Pin(config.DISPLAY_SCL_PIN), sda=Pin(config.DISPLAY_SDA_PIN))
             self.display = icons.SSD1306_SMART(128, 64, i2c, Pin(config.DISPLAY_RST_PIN))
@@ -74,7 +69,7 @@ class HardwareManager:
                 test_value = self.potentiometer.read()
                 if 0 <= test_value <= 4095:
                     self.potentiometer_available = True
-                    # OPTIMIZATION 3: Initialize cache with first reading
+                    # Initialize cache with first reading
                     self.cached_potentiometer_value = int((180.0 / 4095.0) * test_value)
                     print("Potentiometer initialized on pin {}".format(config.POTENTIOMETER_PIN))
                 else:
@@ -91,7 +86,7 @@ class HardwareManager:
         if not self.display:
             return
         
-        # OPTIMIZATION 4: Only update display if content actually changed
+        # Only update display if content actually changed
         if (line1 == self.display_line1 and line2 == self.display_line2 and 
             line3 == self.display_line3 and line4 == self.display_line4):
             return  # No change, skip expensive display update
@@ -123,13 +118,11 @@ class HardwareManager:
         
         current_time = time.ticks_ms()
         
-        # OPTIMIZATION 5: Use cached value if recent reading is available
+        # Use cached value if recent reading is available
         if time.ticks_diff(current_time, self.last_potentiometer_read) < self.potentiometer_cache_timeout:
             return self.cached_potentiometer_value
             
         try:
-            # OPTIMIZATION 6: Single reading instead of 3 readings with delays
-            # This reduces read time from 6ms to ~1ms
             reading = self.potentiometer.read()
             
             # Convert to angle (0-180 degrees)
