@@ -1,12 +1,13 @@
 # ESP32 Wireless and Pyscript-page-less solutions
 
 - **ROS_Integrations:** was never actually implemented. That code can mostly just be ignored
-- **Test Programs:** contains programs that run on the Smart Motors. Wrote these at the beginning of the summer to play around with using the Smart Motors
+- **Test Programs:** contains programs that run on the Smart Motors. Wrote these at the beginning of the summer to play around with using the Smart Motors. They also provide good examples of usage of the servo, OLED screen, potentiometer, buttons, etc.
+
 - **direct_TCP:** esp32 to esp32 connection over direct TCP
 - **final_websocket:** code to run on the new hardware which can be connected over websockets to the Smart Motors using one of Chris's Pyscript pages ([Summer25](https://pyscript.com/@chrisrogers/summer25/latest?files=README.md), [Summer25_Guts](https://pyscript.com/@chrisrogers/summer25-guts/latest?files=README.md))
    - **final:** has the latest/final version of the websocket code that would run on the Smart Motors. Run using smartmotor_main.py (or load boot.py onto an esp32)
 - **http_bridge:** uses HTTP post to send data to and from Smart Motors. Used the online site JSONbin to collect requests. Also tested with requestbin. (NOTE: built in delay with HTTP requests as it's not meant to be a 2-way communication technology). Keep alive was meant to create a buffer that the receiving Smart Motor could constantly read from but this failed.
-- **pyscript_page:** was meant to be a page that listened to actvity on the websocket. However the code in here was very bad. :(
+- **pyscript_page:** was meant to be a page that listened to actvity on the websocket. This folder contains an incomplete implementation that attempts to use a single pyscript page to setup and connect the Smart Motors over channels
 - **talking_on_anyone:** contains the code for [Chris's Pyscript page by the same name](https://pyscript.com/@chrisrogers/talking-on-anyone/latest?files=README.md). Used this Pyscript page to do testing using the channel feature.
 
 
@@ -34,16 +35,10 @@ This implementation, found in final_websocket/final, involves handling the entir
    - All code self-contained, nothing relies on external sites or systems
 - Cons:
    - Unreliable connection that is occasionally interrupted when the Smart Motor disconnects from the websocket
-   - Slow connection time: ~1.6s
+   - Slow connection time: ~0.8s
 ### HTTP Bridge
 Using JSONbin.io and HTTP POST requests, the esp32s send data to the JSON cloud bin and retreive messages from there as well
 -  Pros:
    - Very reliable connection. Only limited by the JSONbin API limits
 - Cons:
    - Slow connection: ~1.9s
-
-### Pyscript Page Connection
-The pyscript_page folder contains an incomplete implementation that attempts to use a single pyscript page to setup and connect the Smart Motors over channels
-
-#### Test Programs
-This folder contains programs that test the various parts of the smart motor for functionality. They also provide good examples of usage of the servo, OLED screen, potentiometer, buttons, etc.
