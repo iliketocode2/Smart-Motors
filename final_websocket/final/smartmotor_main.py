@@ -95,11 +95,7 @@ class SmartMotorController:
         print("Sender thread running")
         
         while self.running:
-            try:
-                if not self.connection_stable:
-                    time.sleep(1)
-                    continue
-                
+            try:                
                 current_time = time.ticks_ms()
                 
                 # Check rate limiting using config values
