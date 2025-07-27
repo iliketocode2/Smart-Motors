@@ -1,5 +1,6 @@
 # ESP32 Wireless and Pyscript-page-less solutions
 
+- **Python Solutions:** contains code that successfully connects to the WebSockets using Python. While this cannot be run on an esp32, it was a test to see how easy it would be to write all of this connection code in a more robust language (Python rather than MicroPython).
 - **ROS_Integrations:** was never actually implemented. That code can mostly just be ignored
 - **Test Programs:** contains programs that run on the Smart Motors. Wrote these at the beginning of the summer to play around with using the Smart Motors. They also provide good examples of usage of the servo, OLED screen, potentiometer, buttons, etc.
 
