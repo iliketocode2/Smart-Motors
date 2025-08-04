@@ -43,3 +43,6 @@ Using JSONbin.io and HTTP POST requests, the esp32s send data to the JSON cloud 
    - Very reliable connection. Only limited by the JSONbin API limits
 - Cons:
    - Slow connection: ~1.9s
+ 
+## Further Documentation:
+Visit the Notion page [here](https://fetlab.notion.site/Smart-Motors-with-Websockets-23cdf3d0e05280e59db1ee467530549b?source=copy_link).
